@@ -423,6 +423,14 @@ func buildCreateTables(d *Dialect) []string {
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS chat_messages(id %s,from_user_id BIGINT NOT NULL,to_user_id BIGINT NOT NULL,message_type VARCHAR(20) NOT NULL DEFAULT 'text',content TEXT NOT NULL,media_url VARCHAR(1024) NOT NULL DEFAULT '',file_name VARCHAR(256) NOT NULL DEFAULT '',mime_type VARCHAR(120) NOT NULL DEFAULT '',file_size BIGINT NOT NULL DEFAULT 0,transcript TEXT NOT NULL DEFAULT '',translation TEXT NOT NULL DEFAULT '',created_at %s NOT NULL DEFAULT %s,CONSTRAINT fk_msg_from FOREIGN KEY(from_user_id) REFERENCES users(id),CONSTRAINT fk_msg_to FOREIGN KEY(to_user_id) REFERENCES users(id))`, pk, ts, now),
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS operation_logs(id %s,user_id BIGINT NOT NULL DEFAULT 0,username VARCHAR(100) NOT NULL DEFAULT '',action VARCHAR(80) NOT NULL,resource VARCHAR(120) NOT NULL DEFAULT '',detail TEXT NOT NULL DEFAULT '',ip VARCHAR(80) NOT NULL DEFAULT '',user_agent TEXT NOT NULL DEFAULT '',created_at %s NOT NULL DEFAULT %s)`, pk, ts, now),
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS notifications(id %s,user_id BIGINT,title VARCHAR(160) NOT NULL,content TEXT NOT NULL DEFAULT '',type VARCHAR(40) NOT NULL DEFAULT 'info',is_read BOOLEAN NOT NULL DEFAULT FALSE,created_at %s NOT NULL DEFAULT %s,read_at %s,CONSTRAINT fk_notice_user FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)`, pk, ts, now, ts),
+		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS site_announcements(id %s,title VARCHAR(160) NOT NULL,content TEXT NOT NULL DEFAULT '',link_url VARCHAR(1024) NOT NULL DEFAULT '',is_active BOOLEAN NOT NULL DEFAULT TRUE,sort_order INT NOT NULL DEFAULT 0,starts_at %s,ends_at %s,created_at %s NOT NULL DEFAULT %s,updated_at %s NOT NULL DEFAULT %s)`, pk, ts, ts, ts, now, ts, now),
+		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS site_banners(id %s,title VARCHAR(160) NOT NULL,subtitle VARCHAR(255) NOT NULL DEFAULT '',image_url VARCHAR(1024) NOT NULL DEFAULT '',link_url VARCHAR(1024) NOT NULL DEFAULT '',is_active BOOLEAN NOT NULL DEFAULT TRUE,sort_order INT NOT NULL DEFAULT 0,created_at %s NOT NULL DEFAULT %s,updated_at %s NOT NULL DEFAULT %s)`, pk, ts, now, ts, now),
+		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS site_resources(id %s,title VARCHAR(180) NOT NULL,slug VARCHAR(180) NOT NULL DEFAULT '',summary VARCHAR(500) NOT NULL DEFAULT '',content TEXT NOT NULL DEFAULT '',markdown_content TEXT NOT NULL DEFAULT '',category VARCHAR(80) NOT NULL DEFAULT 'learning',cover_url VARCHAR(1024) NOT NULL DEFAULT '',link_url VARCHAR(1024) NOT NULL DEFAULT '',tags VARCHAR(500) NOT NULL DEFAULT '',seo_title VARCHAR(180) NOT NULL DEFAULT '',seo_description VARCHAR(300) NOT NULL DEFAULT '',seo_keywords VARCHAR(300) NOT NULL DEFAULT '',status VARCHAR(20) NOT NULL DEFAULT 'draft',is_featured BOOLEAN NOT NULL DEFAULT FALSE,view_count BIGINT NOT NULL DEFAULT 0,sort_order INT NOT NULL DEFAULT 0,published_at %s,created_at %s NOT NULL DEFAULT %s,updated_at %s NOT NULL DEFAULT %s)`, pk, ts, ts, now, ts, now),
+		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS site_tech_stacks(id %s,name VARCHAR(120) NOT NULL,category VARCHAR(80) NOT NULL DEFAULT 'frontend',level INT NOT NULL DEFAULT 60,icon_url VARCHAR(1024) NOT NULL DEFAULT '',description VARCHAR(500) NOT NULL DEFAULT '',is_active BOOLEAN NOT NULL DEFAULT TRUE,sort_order INT NOT NULL DEFAULT 0,created_at %s NOT NULL DEFAULT %s,updated_at %s NOT NULL DEFAULT %s)`, pk, ts, now, ts, now),
+		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS site_projects(id %s,name VARCHAR(160) NOT NULL,summary VARCHAR(500) NOT NULL DEFAULT '',description TEXT NOT NULL DEFAULT '',cover_url VARCHAR(1024) NOT NULL DEFAULT '',demo_url VARCHAR(1024) NOT NULL DEFAULT '',repo_url VARCHAR(1024) NOT NULL DEFAULT '',stack_tags VARCHAR(500) NOT NULL DEFAULT '',status VARCHAR(20) NOT NULL DEFAULT 'draft',is_featured BOOLEAN NOT NULL DEFAULT FALSE,sort_order INT NOT NULL DEFAULT 0,published_at %s,created_at %s NOT NULL DEFAULT %s,updated_at %s NOT NULL DEFAULT %s)`, pk, ts, ts, now, ts, now),
+		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS site_timeline_events(id %s,title VARCHAR(180) NOT NULL,summary VARCHAR(500) NOT NULL DEFAULT '',content TEXT NOT NULL DEFAULT '',phase VARCHAR(100) NOT NULL DEFAULT '',event_type VARCHAR(60) NOT NULL DEFAULT 'learning',tags VARCHAR(500) NOT NULL DEFAULT '',link_url VARCHAR(1024) NOT NULL DEFAULT '',status VARCHAR(20) NOT NULL DEFAULT 'draft',is_featured BOOLEAN NOT NULL DEFAULT FALSE,sort_order INT NOT NULL DEFAULT 0,happened_at %s,published_at %s,created_at %s NOT NULL DEFAULT %s,updated_at %s NOT NULL DEFAULT %s)`, pk, ts, ts, ts, now, ts, now),
+		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS site_messages(id %s,visitor_name VARCHAR(120) NOT NULL DEFAULT '',email VARCHAR(255) NOT NULL DEFAULT '',content TEXT NOT NULL DEFAULT '',reply TEXT NOT NULL DEFAULT '',status VARCHAR(20) NOT NULL DEFAULT 'pending',is_public BOOLEAN NOT NULL DEFAULT TRUE,ip_address VARCHAR(80) NOT NULL DEFAULT '',user_agent TEXT NOT NULL DEFAULT '',created_at %s NOT NULL DEFAULT %s,updated_at %s NOT NULL DEFAULT %s)`, pk, ts, now, ts, now),
+		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS site_visits(id %s,path VARCHAR(1024) NOT NULL DEFAULT '/',referrer VARCHAR(1024) NOT NULL DEFAULT '',device VARCHAR(40) NOT NULL DEFAULT 'desktop',ip_address VARCHAR(80) NOT NULL DEFAULT '',user_agent TEXT NOT NULL DEFAULT '',created_at %s NOT NULL DEFAULT %s)`, pk, ts, now),
 	}
 }
 
@@ -460,6 +468,21 @@ func ensureColumns(db *sql.DB, d *Dialect) error {
 		if !columnExists(db, d, "chat_messages", col) {
 			if _, err := db.Exec(stmt); err != nil {
 				return fmt.Errorf("add chat column %s: %w", col, err)
+			}
+		}
+	}
+	resourceCols := map[string]string{
+		"slug":             `ALTER TABLE site_resources ADD COLUMN IF NOT EXISTS slug VARCHAR(180) NOT NULL DEFAULT ''`,
+		"markdown_content": `ALTER TABLE site_resources ADD COLUMN IF NOT EXISTS markdown_content TEXT NOT NULL DEFAULT ''`,
+		"seo_title":        `ALTER TABLE site_resources ADD COLUMN IF NOT EXISTS seo_title VARCHAR(180) NOT NULL DEFAULT ''`,
+		"seo_description":  `ALTER TABLE site_resources ADD COLUMN IF NOT EXISTS seo_description VARCHAR(300) NOT NULL DEFAULT ''`,
+		"seo_keywords":     `ALTER TABLE site_resources ADD COLUMN IF NOT EXISTS seo_keywords VARCHAR(300) NOT NULL DEFAULT ''`,
+		"view_count":       `ALTER TABLE site_resources ADD COLUMN IF NOT EXISTS view_count BIGINT NOT NULL DEFAULT 0`,
+	}
+	for col, stmt := range resourceCols {
+		if !columnExists(db, d, "site_resources", col) {
+			if _, err := db.Exec(stmt); err != nil {
+				return fmt.Errorf("add site resource column %s: %w", col, err)
 			}
 		}
 	}
@@ -747,6 +770,142 @@ func knownSchemaComments() map[string]schemaComment {
 				"read_at":    "阅读时间",
 			},
 		},
+		"site_announcements": {
+			Table: "官网公告表",
+			Columns: map[string]string{
+				"id":         "公告ID",
+				"title":      "公告标题",
+				"content":    "公告内容",
+				"link_url":   "跳转链接",
+				"is_active":  "是否启用",
+				"sort_order": "排序",
+				"starts_at":  "开始展示时间",
+				"ends_at":    "结束展示时间",
+				"created_at": "创建时间",
+				"updated_at": "更新时间",
+			},
+		},
+		"site_banners": {
+			Table: "官网轮播图表",
+			Columns: map[string]string{
+				"id":         "轮播ID",
+				"title":      "轮播标题",
+				"subtitle":   "轮播副标题",
+				"image_url":  "图片地址",
+				"link_url":   "跳转链接",
+				"is_active":  "是否启用",
+				"sort_order": "排序",
+				"created_at": "创建时间",
+				"updated_at": "更新时间",
+			},
+		},
+		"site_resources": {
+			Table: "官网文章资源表",
+			Columns: map[string]string{
+				"id":               "资源ID",
+				"title":            "文章标题",
+				"slug":             "SEO访问标识",
+				"summary":          "文章摘要",
+				"content":          "渲染正文内容",
+				"markdown_content": "Markdown正文",
+				"category":         "文章分类",
+				"cover_url":        "封面地址",
+				"link_url":         "外部链接",
+				"tags":             "标签",
+				"seo_title":        "SEO标题",
+				"seo_description":  "SEO描述",
+				"seo_keywords":     "SEO关键词",
+				"status":           "发布状态",
+				"is_featured":      "是否精选",
+				"view_count":       "浏览次数",
+				"sort_order":       "排序",
+				"published_at":     "发布时间",
+				"created_at":       "创建时间",
+				"updated_at":       "更新时间",
+			},
+		},
+		"site_tech_stacks": {
+			Table: "官网技术栈表",
+			Columns: map[string]string{
+				"id":          "技术栈ID",
+				"name":        "技术名称",
+				"category":    "技术分类",
+				"level":       "掌握程度",
+				"icon_url":    "图标地址",
+				"description": "技术描述",
+				"is_active":   "是否启用",
+				"sort_order":  "排序",
+				"created_at":  "创建时间",
+				"updated_at":  "更新时间",
+			},
+		},
+		"site_projects": {
+			Table: "官网项目作品表",
+			Columns: map[string]string{
+				"id":           "项目ID",
+				"name":         "项目名称",
+				"summary":      "项目摘要",
+				"description":  "项目描述",
+				"cover_url":    "封面地址",
+				"demo_url":     "演示地址",
+				"repo_url":     "仓库地址",
+				"stack_tags":   "技术标签",
+				"status":       "发布状态",
+				"is_featured":  "是否精选",
+				"sort_order":   "排序",
+				"published_at": "发布时间",
+				"created_at":   "创建时间",
+				"updated_at":   "更新时间",
+			},
+		},
+		"site_timeline_events": {
+			Table: "官网时间轴学习记录表",
+			Columns: map[string]string{
+				"id":           "记录ID",
+				"title":        "记录标题",
+				"summary":      "记录摘要",
+				"content":      "记录内容",
+				"phase":        "学习阶段",
+				"event_type":   "记录类型",
+				"tags":         "标签",
+				"link_url":     "关联链接",
+				"status":       "发布状态",
+				"is_featured":  "是否精选",
+				"sort_order":   "排序",
+				"happened_at":  "发生时间",
+				"published_at": "发布时间",
+				"created_at":   "创建时间",
+				"updated_at":   "更新时间",
+			},
+		},
+		"site_messages": {
+			Table: "官网留言提问表",
+			Columns: map[string]string{
+				"id":           "留言ID",
+				"visitor_name": "访客名称",
+				"email":        "访客邮箱",
+				"content":      "留言内容",
+				"reply":        "后台回复",
+				"status":       "审核状态",
+				"is_public":    "是否公开展示",
+				"ip_address":   "IP地址",
+				"user_agent":   "浏览器标识",
+				"created_at":   "创建时间",
+				"updated_at":   "更新时间",
+			},
+		},
+		"site_visits": {
+			Table: "官网访问统计表",
+			Columns: map[string]string{
+				"id":         "访问ID",
+				"path":       "访问路径",
+				"referrer":   "来源地址",
+				"device":     "设备类型",
+				"ip_address": "IP地址",
+				"user_agent": "浏览器标识",
+				"created_at": "访问时间",
+			},
+		},
 	}
 }
 
@@ -892,6 +1051,16 @@ func buildIndexes(d *Dialect) []string {
 		`CREATE INDEX IF NOT EXISTS idx_chat_messages_to ON chat_messages(to_user_id, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_operation_logs_created ON operation_logs(created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id, is_read, created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_site_announcements_active ON site_announcements(is_active, sort_order, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_site_banners_active ON site_banners(is_active, sort_order, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_site_resources_status ON site_resources(status, is_featured, sort_order, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_site_resources_slug ON site_resources(slug)`,
+		`CREATE INDEX IF NOT EXISTS idx_site_tech_stacks_active ON site_tech_stacks(is_active, sort_order, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_site_projects_status ON site_projects(status, is_featured, sort_order, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_site_timeline_status ON site_timeline_events(status, is_featured, sort_order, happened_at DESC, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_site_messages_status ON site_messages(status, is_public, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_site_visits_created ON site_visits(created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_site_visits_path ON site_visits(path, created_at DESC)`,
 	}
 	mysqlIdx := []string{
 		`CREATE INDEX idx_users_phone ON users(phone)`,
@@ -900,6 +1069,16 @@ func buildIndexes(d *Dialect) []string {
 		`CREATE INDEX idx_chat_messages_to ON chat_messages(to_user_id, created_at DESC)`,
 		`CREATE INDEX idx_operation_logs_created ON operation_logs(created_at DESC)`,
 		`CREATE INDEX idx_notifications_user_read ON notifications(user_id, is_read, created_at DESC)`,
+		`CREATE INDEX idx_site_announcements_active ON site_announcements(is_active, sort_order, id)`,
+		`CREATE INDEX idx_site_banners_active ON site_banners(is_active, sort_order, id)`,
+		`CREATE INDEX idx_site_resources_status ON site_resources(status, is_featured, sort_order, id)`,
+		`CREATE INDEX idx_site_resources_slug ON site_resources(slug)`,
+		`CREATE INDEX idx_site_tech_stacks_active ON site_tech_stacks(is_active, sort_order, id)`,
+		`CREATE INDEX idx_site_projects_status ON site_projects(status, is_featured, sort_order, id)`,
+		`CREATE INDEX idx_site_timeline_status ON site_timeline_events(status, is_featured, sort_order, happened_at, id)`,
+		`CREATE INDEX idx_site_messages_status ON site_messages(status, is_public, id)`,
+		`CREATE INDEX idx_site_visits_created ON site_visits(created_at)`,
+		`CREATE INDEX idx_site_visits_path ON site_visits(path, created_at)`,
 	}
 	switch d.Type {
 	case DBTypePostgres:
@@ -934,6 +1113,7 @@ func seedRBAC(db *sql.DB, d *Dialect) error {
 		{"notifications:read", "View notifications"}, {"notifications:write", "Manage notifications"},
 		{"ai:assistant", "Use admin AI assistant"}, {"health:read", "View system health"},
 		{"database:read", "View database table metadata"},
+		{"site:read", "View website content"}, {"site:write", "Manage website content and assets"},
 	} {
 		sqlStr := d.RewriteSQL(fmt.Sprintf(`INSERT INTO permissions(code,description) VALUES($1,$2) %s`, upsertPerm))
 		if _, err := db.Exec(sqlStr, p.c, p.d); err != nil {
@@ -970,6 +1150,9 @@ func seedRBAC(db *sql.DB, d *Dialect) error {
 	if err := seedNotifications(db, d); err != nil {
 		return err
 	}
+	if err := seedSiteContent(db, d); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -989,6 +1172,118 @@ func seedNotifications(db *sql.DB, d *Dialect) error {
 	for _, item := range items {
 		if _, err := db.Exec(d.RewriteSQL(`INSERT INTO notifications(title,content,type) VALUES($1,$2,$3)`), item.title, item.content, item.typ); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func seedSiteContent(db *sql.DB, d *Dialect) error {
+	var count int
+	if err := db.QueryRow(d.RewriteSQL(`SELECT COUNT(*) FROM site_banners`)).Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		banners := []struct {
+			title, subtitle, imageURL, linkURL string
+			sort                               int
+		}{
+			{"构建我的技术宇宙", "React、Go、数据库与工程实践的长期记录。", "/uploads/site/default-lab.svg", "", 10},
+			{"学习笔记和项目复盘", "把踩坑、源码阅读和系统设计沉淀成可检索的知识。", "/uploads/site/default-notes.svg", "", 20},
+			{"让后台驱动前台", "公告、轮播、资源和技术栈都从 Admins 管理端发布。", "/uploads/site/default-console.svg", "", 30},
+		}
+		for _, item := range banners {
+			if _, err := db.Exec(d.RewriteSQL(`INSERT INTO site_banners(title,subtitle,image_url,link_url,is_active,sort_order) VALUES($1,$2,$3,$4,TRUE,$5)`), item.title, item.subtitle, item.imageURL, item.linkURL, item.sort); err != nil {
+				return err
+			}
+		}
+	}
+
+	if err := db.QueryRow(d.RewriteSQL(`SELECT COUNT(*) FROM site_announcements`)).Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		if _, err := db.Exec(d.RewriteSQL(`INSERT INTO site_announcements(title,content,link_url,is_active,sort_order) VALUES($1,$2,$3,TRUE,$4)`), "官网内容中心已上线", "现在可以在后台维护前台公告、轮播图、学习资源和技术栈。", "", 10); err != nil {
+			return err
+		}
+	}
+
+	if err := db.QueryRow(d.RewriteSQL(`SELECT COUNT(*) FROM site_resources`)).Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		resources := []struct {
+			title, summary, category, tags string
+			featured                       bool
+			sort                           int
+		}{
+			{"React 前台工程化", "记录 Vite、组件拆分、状态管理和动效组织方式。", "frontend", "React,Vite,Three.js", true, 10},
+			{"Go 后台接口实践", "围绕 Gin、RBAC、迁移、上传和公开接口的实现笔记。", "backend", "Go,Gin,PostgreSQL", true, 20},
+			{"数据库结构和权限设计", "沉淀用户、角色、权限和内容管理的数据建模。", "database", "PostgreSQL,RBAC,Schema", false, 30},
+		}
+		for _, item := range resources {
+			if _, err := db.Exec(d.RewriteSQL(`INSERT INTO site_resources(title,summary,content,category,tags,status,is_featured,sort_order,published_at) VALUES($1,$2,$3,$4,$5,'published',$6,$7,`+d.Now()+`)`), item.title, item.summary, item.summary, item.category, item.tags, item.featured, item.sort); err != nil {
+				return err
+			}
+		}
+	}
+
+	if err := db.QueryRow(d.RewriteSQL(`SELECT COUNT(*) FROM site_tech_stacks`)).Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		stacks := []struct {
+			name, category, description string
+			level, sort                 int
+		}{
+			{"React", "frontend", "用于构建前台博客官网和交互界面。", 86, 10},
+			{"Three.js", "creative", "承载首页 3D 技术星图和沉浸动效。", 72, 20},
+			{"Vue Admin", "frontend", "管理系统延续 Pure Admin 与 Element Plus 风格。", 80, 30},
+			{"Go Gin", "backend", "提供认证、RBAC、内容管理和公开数据接口。", 82, 40},
+			{"PostgreSQL", "database", "存放管理系统和官网内容数据。", 78, 50},
+		}
+		for _, item := range stacks {
+			if _, err := db.Exec(d.RewriteSQL(`INSERT INTO site_tech_stacks(name,category,level,description,is_active,sort_order) VALUES($1,$2,$3,$4,TRUE,$5)`), item.name, item.category, item.level, item.description, item.sort); err != nil {
+				return err
+			}
+		}
+	}
+
+	if err := db.QueryRow(d.RewriteSQL(`SELECT COUNT(*) FROM site_projects`)).Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		projects := []struct {
+			name, summary, description, stackTags string
+			featured                              bool
+			sort                                  int
+		}{
+			{"Admins 管理系统", "Vue Admin + Go Gin 的权限后台和内容管理平台。", "包含 RBAC、聊天、系统工具、官网内容管理和数据表结构查看。", "Vue Admin,Go Gin,PostgreSQL,RBAC", true, 10},
+			{"技术实验室官网", "React + Three.js 驱动的个人博客官网。", "前台展示公告、轮播、学习笔记、项目 Demo 和技术星图。", "React,Three.js,Vite,Go Gin", true, 20},
+			{"数据库结构看板", "从数据库元数据生成字段说明和结构视图。", "用于查看表字段、索引大小、字段注释和基础元信息。", "PostgreSQL,Schema,Go", false, 30},
+		}
+		for _, item := range projects {
+			if _, err := db.Exec(d.RewriteSQL(`INSERT INTO site_projects(name,summary,description,stack_tags,status,is_featured,sort_order,published_at) VALUES($1,$2,$3,$4,'published',$5,$6,`+d.Now()+`)`), item.name, item.summary, item.description, item.stackTags, item.featured, item.sort); err != nil {
+				return err
+			}
+		}
+	}
+
+	if err := db.QueryRow(d.RewriteSQL(`SELECT COUNT(*) FROM site_timeline_events`)).Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		events := []struct {
+			title, summary, content, phase, eventType, tags string
+			sort                                            int
+		}{
+			{"Build Admins base", "Finished auth, RBAC and admin shell.", "Started from user, role, permission and dashboard foundations.", "Foundation", "project", "Vue,Go,RBAC", 10},
+			{"Website content center", "Connected public site content to the admin panel.", "Banners, announcements, articles, projects and tech stack now come from the backend.", "Content", "release", "React,Vite,Content", 20},
+			{"Knowledge and review flow", "Added blog notes, Q&A, messages and analytics.", "Public submissions enter a review queue before being shown on the website.", "Growth", "learning", "Blog,Review,Analytics", 30},
+		}
+		for _, item := range events {
+			if _, err := db.Exec(d.RewriteSQL(`INSERT INTO site_timeline_events(title,summary,content,phase,event_type,tags,status,is_featured,sort_order,happened_at,published_at) VALUES($1,$2,$3,$4,$5,$6,'published',TRUE,$7,`+d.Now()+`,`+d.Now()+`)`), item.title, item.summary, item.content, item.phase, item.eventType, item.tags, item.sort); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

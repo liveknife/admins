@@ -135,6 +135,30 @@ const buildAdminRoutes = (user: GoUser) => {
     });
   }
 
+  if (hasAdminAccess && permissions.includes("site:read")) {
+    routes.push({
+      path: "/site-admin",
+      name: "SiteAdmin",
+      meta: {
+        title: "官网管理",
+        icon: "ri:global-line",
+        rank: 13
+      },
+      children: [
+        {
+          path: "/site-admin/content",
+          component: "site-admin/content/index",
+          name: "SiteAdminContent",
+          meta: {
+            title: "内容发布",
+            icon: "ri:layout-masonry-line",
+            auths: ["site:read", "site:write"]
+          }
+        }
+      ]
+    });
+  }
+
   if (permissions.includes("messages:chat")) {
     routes.push({
       path: "/message",

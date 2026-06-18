@@ -26,6 +26,102 @@ type OperationLogInput struct {
 	UserAgent string
 }
 
+type SiteAnnouncementInput struct {
+	Title     string
+	Content   string
+	LinkURL   string
+	IsActive  bool
+	SortOrder int
+	StartsAt  *time.Time
+	EndsAt    *time.Time
+}
+
+type SiteBannerInput struct {
+	Title     string
+	Subtitle  string
+	ImageURL  string
+	LinkURL   string
+	IsActive  bool
+	SortOrder int
+}
+
+type SiteResourceInput struct {
+	Title           string
+	Slug            string
+	Summary         string
+	Content         string
+	MarkdownContent string
+	Category        string
+	CoverURL        string
+	LinkURL         string
+	Tags            string
+	SEOTitle        string
+	SEODescription  string
+	SEOKeywords     string
+	Status          string
+	IsFeatured      bool
+	SortOrder       int
+	PublishedAt     *time.Time
+}
+
+type SiteTechStackInput struct {
+	Name        string
+	Category    string
+	Level       int
+	IconURL     string
+	Description string
+	IsActive    bool
+	SortOrder   int
+}
+
+type SiteProjectInput struct {
+	Name        string
+	Summary     string
+	Description string
+	CoverURL    string
+	DemoURL     string
+	RepoURL     string
+	StackTags   string
+	Status      string
+	IsFeatured  bool
+	SortOrder   int
+	PublishedAt *time.Time
+}
+
+type SiteTimelineEventInput struct {
+	Title       string
+	Summary     string
+	Content     string
+	Phase       string
+	EventType   string
+	Tags        string
+	LinkURL     string
+	Status      string
+	IsFeatured  bool
+	SortOrder   int
+	HappenedAt  *time.Time
+	PublishedAt *time.Time
+}
+
+type SiteMessageInput struct {
+	VisitorName string
+	Email       string
+	Content     string
+	Reply       string
+	Status      string
+	IsPublic    bool
+	IPAddress   string
+	UserAgent   string
+}
+
+type SiteVisitInput struct {
+	Path      string
+	Referrer  string
+	Device    string
+	IPAddress string
+	UserAgent string
+}
+
 func NewAdminDataService(db *sql.DB) *AdminDataService {
 	return &AdminDataService{db: db}
 }
@@ -238,6 +334,26 @@ func (s *AdminDataService) MarkAllNotificationsRead(ctx context.Context, userID 
 	return err
 }
 
+func (s *AdminDataService) CreateReviewNotification(ctx context.Context, title, content, resourcePath string) error {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		title = "New review item"
+	}
+	content = strings.TrimSpace(content)
+	if resourcePath = strings.TrimSpace(resourcePath); resourcePath != "" {
+		if content != "" {
+			content += "\n"
+		}
+		content += "Open: " + resourcePath
+	}
+	_, err := database.ExecCtx(ctx, s.db,
+		`INSERT INTO notifications(user_id,title,content,type,is_read) VALUES(NULL,$1,$2,'warning',FALSE)`,
+		title,
+		content,
+	)
+	return err
+}
+
 func (s *AdminDataService) DatabaseCatalog(ctx context.Context) (*models.DatabaseCatalog, error) {
 	current, err := s.currentDatabase(ctx)
 	if err != nil {
@@ -304,6 +420,774 @@ func (s *AdminDataService) ListDatabaseColumns(ctx context.Context, dbName, tabl
 	return s.listPostgresColumns(ctx, tableName)
 }
 
+func (s *AdminDataService) PublicSiteHome(ctx context.Context) (*models.SiteHome, error) {
+	now := time.Now()
+	announcements, _, err := s.ListSiteAnnouncements(ctx, 1, 5, "active")
+	if err != nil {
+		return nil, err
+	}
+	activeAnnouncements := make([]models.SiteAnnouncement, 0, len(announcements))
+	for _, item := range announcements {
+		if item.StartsAt != nil && item.StartsAt.After(now) {
+			continue
+		}
+		if item.EndsAt != nil && item.EndsAt.Before(now) {
+			continue
+		}
+		activeAnnouncements = append(activeAnnouncements, item)
+	}
+	banners, _, err := s.ListSiteBanners(ctx, 1, 10, "active")
+	if err != nil {
+		return nil, err
+	}
+	resources, _, err := s.ListSiteResources(ctx, 1, 12, "published")
+	if err != nil {
+		return nil, err
+	}
+	stacks, _, err := s.ListSiteTechStacks(ctx, 1, 30, "active")
+	if err != nil {
+		return nil, err
+	}
+	projects, _, err := s.ListSiteProjects(ctx, 1, 12, "published")
+	if err != nil {
+		return nil, err
+	}
+	timeline, _, err := s.ListSiteTimelineEvents(ctx, 1, 20, "published")
+	if err != nil {
+		return nil, err
+	}
+	messages, _, err := s.ListSiteMessages(ctx, 1, 6, "approved")
+	if err != nil {
+		return nil, err
+	}
+	analytics, err := s.PublicSiteStats(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &models.SiteHome{Announcements: activeAnnouncements, Banners: banners, Resources: resources, TechStacks: stacks, Projects: projects, Timeline: timeline, Messages: messages, Analytics: *analytics}, nil
+}
+
+func (s *AdminDataService) ListSiteAnnouncements(ctx context.Context, page, pageSize int, status string) ([]models.SiteAnnouncement, int64, error) {
+	where := "WHERE 1=1"
+	if status == "active" {
+		where += " AND is_active=TRUE"
+	} else if status == "inactive" {
+		where += " AND is_active=FALSE"
+	}
+	var total int64
+	if err := database.QueryRowCtx(ctx, s.db, `SELECT COUNT(*) FROM site_announcements `+where).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	limit, offset := normalizePagination(page, pageSize)
+	rows, err := database.QueryCtx(ctx, s.db, `SELECT id,title,content,link_url,is_active,sort_order,starts_at,ends_at,created_at,updated_at FROM site_announcements `+where+` ORDER BY sort_order ASC,id DESC LIMIT $1 OFFSET $2`, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	items := make([]models.SiteAnnouncement, 0)
+	for rows.Next() {
+		item, err := scanSiteAnnouncement(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		items = append(items, item)
+	}
+	return items, total, rows.Err()
+}
+
+func (s *AdminDataService) CreateSiteAnnouncement(ctx context.Context, input SiteAnnouncementInput) (*models.SiteAnnouncement, error) {
+	input.Title = strings.TrimSpace(input.Title)
+	if input.Title == "" {
+		return nil, fmt.Errorf("title is required")
+	}
+	var id int64
+	query := database.RewriteSQL(`INSERT INTO site_announcements(title,content,link_url,is_active,sort_order,starts_at,ends_at) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id`)
+	if database.CurrentDialect.SupportsReturning() {
+		if err := s.db.QueryRowContext(ctx, query, input.Title, input.Content, input.LinkURL, input.IsActive, input.SortOrder, input.StartsAt, input.EndsAt).Scan(&id); err != nil {
+			return nil, err
+		}
+	} else {
+		result, err := s.db.ExecContext(ctx, strings.Replace(query, " RETURNING id", "", -1), input.Title, input.Content, input.LinkURL, input.IsActive, input.SortOrder, input.StartsAt, input.EndsAt)
+		if err != nil {
+			return nil, err
+		}
+		id, _ = result.LastInsertId()
+	}
+	return s.GetSiteAnnouncement(ctx, id)
+}
+
+func (s *AdminDataService) UpdateSiteAnnouncement(ctx context.Context, id int64, input SiteAnnouncementInput) (*models.SiteAnnouncement, error) {
+	_, err := database.ExecCtx(ctx, s.db, `UPDATE site_announcements SET title=$1,content=$2,link_url=$3,is_active=$4,sort_order=$5,starts_at=$6,ends_at=$7,updated_at=`+database.Now()+` WHERE id=$8`, strings.TrimSpace(input.Title), input.Content, input.LinkURL, input.IsActive, input.SortOrder, input.StartsAt, input.EndsAt, id)
+	if err != nil {
+		return nil, err
+	}
+	return s.GetSiteAnnouncement(ctx, id)
+}
+
+func (s *AdminDataService) DeleteSiteAnnouncement(ctx context.Context, id int64) error {
+	_, err := database.ExecCtx(ctx, s.db, `DELETE FROM site_announcements WHERE id=$1`, id)
+	return err
+}
+
+func (s *AdminDataService) GetSiteAnnouncement(ctx context.Context, id int64) (*models.SiteAnnouncement, error) {
+	rows, err := database.QueryCtx(ctx, s.db, `SELECT id,title,content,link_url,is_active,sort_order,starts_at,ends_at,created_at,updated_at FROM site_announcements WHERE id=$1`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, sql.ErrNoRows
+	}
+	item, err := scanSiteAnnouncement(rows)
+	return &item, err
+}
+
+func (s *AdminDataService) ListSiteBanners(ctx context.Context, page, pageSize int, status string) ([]models.SiteBanner, int64, error) {
+	where := "WHERE 1=1"
+	if status == "active" {
+		where += " AND is_active=TRUE"
+	} else if status == "inactive" {
+		where += " AND is_active=FALSE"
+	}
+	var total int64
+	if err := database.QueryRowCtx(ctx, s.db, `SELECT COUNT(*) FROM site_banners `+where).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	limit, offset := normalizePagination(page, pageSize)
+	rows, err := database.QueryCtx(ctx, s.db, `SELECT id,title,subtitle,image_url,link_url,is_active,sort_order,created_at,updated_at FROM site_banners `+where+` ORDER BY sort_order ASC,id DESC LIMIT $1 OFFSET $2`, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	items := make([]models.SiteBanner, 0)
+	for rows.Next() {
+		var item models.SiteBanner
+		if err := rows.Scan(&item.ID, &item.Title, &item.Subtitle, &item.ImageURL, &item.LinkURL, &item.IsActive, &item.SortOrder, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, 0, err
+		}
+		items = append(items, item)
+	}
+	return items, total, rows.Err()
+}
+
+func (s *AdminDataService) CreateSiteBanner(ctx context.Context, input SiteBannerInput) (*models.SiteBanner, error) {
+	var id int64
+	query := database.RewriteSQL(`INSERT INTO site_banners(title,subtitle,image_url,link_url,is_active,sort_order) VALUES($1,$2,$3,$4,$5,$6) RETURNING id`)
+	if database.CurrentDialect.SupportsReturning() {
+		if err := s.db.QueryRowContext(ctx, query, strings.TrimSpace(input.Title), input.Subtitle, input.ImageURL, input.LinkURL, input.IsActive, input.SortOrder).Scan(&id); err != nil {
+			return nil, err
+		}
+	} else {
+		result, err := s.db.ExecContext(ctx, strings.Replace(query, " RETURNING id", "", -1), strings.TrimSpace(input.Title), input.Subtitle, input.ImageURL, input.LinkURL, input.IsActive, input.SortOrder)
+		if err != nil {
+			return nil, err
+		}
+		id, _ = result.LastInsertId()
+	}
+	return s.GetSiteBanner(ctx, id)
+}
+
+func (s *AdminDataService) UpdateSiteBanner(ctx context.Context, id int64, input SiteBannerInput) (*models.SiteBanner, error) {
+	_, err := database.ExecCtx(ctx, s.db, `UPDATE site_banners SET title=$1,subtitle=$2,image_url=$3,link_url=$4,is_active=$5,sort_order=$6,updated_at=`+database.Now()+` WHERE id=$7`, strings.TrimSpace(input.Title), input.Subtitle, input.ImageURL, input.LinkURL, input.IsActive, input.SortOrder, id)
+	if err != nil {
+		return nil, err
+	}
+	return s.GetSiteBanner(ctx, id)
+}
+
+func (s *AdminDataService) DeleteSiteBanner(ctx context.Context, id int64) error {
+	_, err := database.ExecCtx(ctx, s.db, `DELETE FROM site_banners WHERE id=$1`, id)
+	return err
+}
+
+func (s *AdminDataService) GetSiteBanner(ctx context.Context, id int64) (*models.SiteBanner, error) {
+	var item models.SiteBanner
+	err := database.QueryRowCtx(ctx, s.db, `SELECT id,title,subtitle,image_url,link_url,is_active,sort_order,created_at,updated_at FROM site_banners WHERE id=$1`, id).Scan(&item.ID, &item.Title, &item.Subtitle, &item.ImageURL, &item.LinkURL, &item.IsActive, &item.SortOrder, &item.CreatedAt, &item.UpdatedAt)
+	return &item, err
+}
+
+func (s *AdminDataService) ListSiteResources(ctx context.Context, page, pageSize int, status string) ([]models.SiteResource, int64, error) {
+	where := "WHERE 1=1"
+	countArgs := []any{}
+	if strings.TrimSpace(status) != "" {
+		where += " AND status=$1"
+		countArgs = append(countArgs, status)
+	}
+	var total int64
+	if err := database.QueryRowCtx(ctx, s.db, `SELECT COUNT(*) FROM site_resources `+where, countArgs...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	limit, offset := normalizePagination(page, pageSize)
+	listWhere := "WHERE 1=1"
+	args := []any{limit, offset}
+	if strings.TrimSpace(status) != "" {
+		listWhere += " AND status=$3"
+		args = append(args, status)
+	}
+	rows, err := database.QueryCtx(ctx, s.db, siteResourceSelect()+` FROM site_resources `+listWhere+` ORDER BY is_featured DESC,sort_order ASC,id DESC LIMIT $1 OFFSET $2`, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	items := make([]models.SiteResource, 0)
+	for rows.Next() {
+		item, err := scanSiteResource(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		items = append(items, item)
+	}
+	return items, total, rows.Err()
+}
+
+func (s *AdminDataService) SaveSiteResource(ctx context.Context, id int64, input SiteResourceInput) (*models.SiteResource, error) {
+	status := strings.TrimSpace(input.Status)
+	if status == "" {
+		status = "draft"
+	}
+	slug := strings.TrimSpace(input.Slug)
+	if slug == "" {
+		slug = slugify(input.Title)
+	}
+	publishedAt := input.PublishedAt
+	if status == "published" && publishedAt == nil {
+		now := time.Now()
+		publishedAt = &now
+	}
+	if id == 0 {
+		var newID int64
+		query := database.RewriteSQL(`INSERT INTO site_resources(title,slug,summary,content,markdown_content,category,cover_url,link_url,tags,seo_title,seo_description,seo_keywords,status,is_featured,sort_order,published_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`)
+		args := []any{strings.TrimSpace(input.Title), slug, input.Summary, input.Content, input.MarkdownContent, input.Category, input.CoverURL, input.LinkURL, input.Tags, input.SEOTitle, input.SEODescription, input.SEOKeywords, status, input.IsFeatured, input.SortOrder, publishedAt}
+		if database.CurrentDialect.SupportsReturning() {
+			if err := s.db.QueryRowContext(ctx, query, args...).Scan(&newID); err != nil {
+				return nil, err
+			}
+		} else {
+			result, err := s.db.ExecContext(ctx, strings.Replace(query, " RETURNING id", "", -1), args...)
+			if err != nil {
+				return nil, err
+			}
+			newID, _ = result.LastInsertId()
+		}
+		return s.GetSiteResource(ctx, newID)
+	}
+	_, err := database.ExecCtx(ctx, s.db, `UPDATE site_resources SET title=$1,slug=$2,summary=$3,content=$4,markdown_content=$5,category=$6,cover_url=$7,link_url=$8,tags=$9,seo_title=$10,seo_description=$11,seo_keywords=$12,status=$13,is_featured=$14,sort_order=$15,published_at=$16,updated_at=`+database.Now()+` WHERE id=$17`, strings.TrimSpace(input.Title), slug, input.Summary, input.Content, input.MarkdownContent, input.Category, input.CoverURL, input.LinkURL, input.Tags, input.SEOTitle, input.SEODescription, input.SEOKeywords, status, input.IsFeatured, input.SortOrder, publishedAt, id)
+	if err != nil {
+		return nil, err
+	}
+	return s.GetSiteResource(ctx, id)
+}
+
+func (s *AdminDataService) DeleteSiteResource(ctx context.Context, id int64) error {
+	_, err := database.ExecCtx(ctx, s.db, `DELETE FROM site_resources WHERE id=$1`, id)
+	return err
+}
+
+func (s *AdminDataService) GetSiteResource(ctx context.Context, id int64) (*models.SiteResource, error) {
+	rows, err := database.QueryCtx(ctx, s.db, siteResourceSelect()+` FROM site_resources WHERE id=$1`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, sql.ErrNoRows
+	}
+	item, err := scanSiteResource(rows)
+	return &item, err
+}
+
+func (s *AdminDataService) GetSiteResourceBySlug(ctx context.Context, slug string) (*models.SiteResource, error) {
+	slug = strings.TrimSpace(slug)
+	idExpr := "CAST(id AS TEXT)"
+	if database.CurrentDialect.Type == database.DBTypeMySQL {
+		idExpr = "CAST(id AS CHAR)"
+	}
+	rows, err := database.QueryCtx(ctx, s.db, siteResourceSelect()+` FROM site_resources WHERE status='published' AND (slug=$1 OR `+idExpr+`=$2) ORDER BY id DESC LIMIT 1`, slug, slug)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, sql.ErrNoRows
+	}
+	item, err := scanSiteResource(rows)
+	if err != nil {
+		return nil, err
+	}
+	_, _ = database.ExecCtx(ctx, s.db, `UPDATE site_resources SET view_count=view_count+1 WHERE id=$1`, item.ID)
+	item.ViewCount++
+	return &item, nil
+}
+
+func (s *AdminDataService) ListSiteTechStacks(ctx context.Context, page, pageSize int, status string) ([]models.SiteTechStack, int64, error) {
+	where := "WHERE 1=1"
+	if status == "active" {
+		where += " AND is_active=TRUE"
+	} else if status == "inactive" {
+		where += " AND is_active=FALSE"
+	}
+	var total int64
+	if err := database.QueryRowCtx(ctx, s.db, `SELECT COUNT(*) FROM site_tech_stacks `+where).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	limit, offset := normalizePagination(page, pageSize)
+	rows, err := database.QueryCtx(ctx, s.db, `SELECT id,name,category,level,icon_url,description,is_active,sort_order,created_at,updated_at FROM site_tech_stacks `+where+` ORDER BY sort_order ASC,id DESC LIMIT $1 OFFSET $2`, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	items := make([]models.SiteTechStack, 0)
+	for rows.Next() {
+		var item models.SiteTechStack
+		if err := rows.Scan(&item.ID, &item.Name, &item.Category, &item.Level, &item.IconURL, &item.Description, &item.IsActive, &item.SortOrder, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, 0, err
+		}
+		items = append(items, item)
+	}
+	return items, total, rows.Err()
+}
+
+func (s *AdminDataService) SaveSiteTechStack(ctx context.Context, id int64, input SiteTechStackInput) (*models.SiteTechStack, error) {
+	level := input.Level
+	if level < 0 {
+		level = 0
+	}
+	if level > 100 {
+		level = 100
+	}
+	if id == 0 {
+		var newID int64
+		query := database.RewriteSQL(`INSERT INTO site_tech_stacks(name,category,level,icon_url,description,is_active,sort_order) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id`)
+		args := []any{strings.TrimSpace(input.Name), input.Category, level, input.IconURL, input.Description, input.IsActive, input.SortOrder}
+		if database.CurrentDialect.SupportsReturning() {
+			if err := s.db.QueryRowContext(ctx, query, args...).Scan(&newID); err != nil {
+				return nil, err
+			}
+		} else {
+			result, err := s.db.ExecContext(ctx, strings.Replace(query, " RETURNING id", "", -1), args...)
+			if err != nil {
+				return nil, err
+			}
+			newID, _ = result.LastInsertId()
+		}
+		return s.GetSiteTechStack(ctx, newID)
+	}
+	_, err := database.ExecCtx(ctx, s.db, `UPDATE site_tech_stacks SET name=$1,category=$2,level=$3,icon_url=$4,description=$5,is_active=$6,sort_order=$7,updated_at=`+database.Now()+` WHERE id=$8`, strings.TrimSpace(input.Name), input.Category, level, input.IconURL, input.Description, input.IsActive, input.SortOrder, id)
+	if err != nil {
+		return nil, err
+	}
+	return s.GetSiteTechStack(ctx, id)
+}
+
+func (s *AdminDataService) DeleteSiteTechStack(ctx context.Context, id int64) error {
+	_, err := database.ExecCtx(ctx, s.db, `DELETE FROM site_tech_stacks WHERE id=$1`, id)
+	return err
+}
+
+func (s *AdminDataService) GetSiteTechStack(ctx context.Context, id int64) (*models.SiteTechStack, error) {
+	var item models.SiteTechStack
+	err := database.QueryRowCtx(ctx, s.db, `SELECT id,name,category,level,icon_url,description,is_active,sort_order,created_at,updated_at FROM site_tech_stacks WHERE id=$1`, id).Scan(&item.ID, &item.Name, &item.Category, &item.Level, &item.IconURL, &item.Description, &item.IsActive, &item.SortOrder, &item.CreatedAt, &item.UpdatedAt)
+	return &item, err
+}
+
+func (s *AdminDataService) ListSiteProjects(ctx context.Context, page, pageSize int, status string) ([]models.SiteProject, int64, error) {
+	where := "WHERE 1=1"
+	countArgs := []any{}
+	if strings.TrimSpace(status) != "" {
+		where += " AND status=$1"
+		countArgs = append(countArgs, status)
+	}
+	var total int64
+	if err := database.QueryRowCtx(ctx, s.db, `SELECT COUNT(*) FROM site_projects `+where, countArgs...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	limit, offset := normalizePagination(page, pageSize)
+	listWhere := "WHERE 1=1"
+	args := []any{limit, offset}
+	if strings.TrimSpace(status) != "" {
+		listWhere += " AND status=$3"
+		args = append(args, status)
+	}
+	rows, err := database.QueryCtx(ctx, s.db, `SELECT id,name,summary,description,cover_url,demo_url,repo_url,stack_tags,status,is_featured,sort_order,published_at,created_at,updated_at FROM site_projects `+listWhere+` ORDER BY is_featured DESC,sort_order ASC,id DESC LIMIT $1 OFFSET $2`, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	items := make([]models.SiteProject, 0)
+	for rows.Next() {
+		item, err := scanSiteProject(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		items = append(items, item)
+	}
+	return items, total, rows.Err()
+}
+
+func (s *AdminDataService) SaveSiteProject(ctx context.Context, id int64, input SiteProjectInput) (*models.SiteProject, error) {
+	status := strings.TrimSpace(input.Status)
+	if status == "" {
+		status = "draft"
+	}
+	if id == 0 {
+		var newID int64
+		query := database.RewriteSQL(`INSERT INTO site_projects(name,summary,description,cover_url,demo_url,repo_url,stack_tags,status,is_featured,sort_order,published_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`)
+		args := []any{strings.TrimSpace(input.Name), input.Summary, input.Description, input.CoverURL, input.DemoURL, input.RepoURL, input.StackTags, status, input.IsFeatured, input.SortOrder, input.PublishedAt}
+		if database.CurrentDialect.SupportsReturning() {
+			if err := s.db.QueryRowContext(ctx, query, args...).Scan(&newID); err != nil {
+				return nil, err
+			}
+		} else {
+			result, err := s.db.ExecContext(ctx, strings.Replace(query, " RETURNING id", "", -1), args...)
+			if err != nil {
+				return nil, err
+			}
+			newID, _ = result.LastInsertId()
+		}
+		return s.GetSiteProject(ctx, newID)
+	}
+	_, err := database.ExecCtx(ctx, s.db, `UPDATE site_projects SET name=$1,summary=$2,description=$3,cover_url=$4,demo_url=$5,repo_url=$6,stack_tags=$7,status=$8,is_featured=$9,sort_order=$10,published_at=$11,updated_at=`+database.Now()+` WHERE id=$12`, strings.TrimSpace(input.Name), input.Summary, input.Description, input.CoverURL, input.DemoURL, input.RepoURL, input.StackTags, status, input.IsFeatured, input.SortOrder, input.PublishedAt, id)
+	if err != nil {
+		return nil, err
+	}
+	return s.GetSiteProject(ctx, id)
+}
+
+func (s *AdminDataService) DeleteSiteProject(ctx context.Context, id int64) error {
+	_, err := database.ExecCtx(ctx, s.db, `DELETE FROM site_projects WHERE id=$1`, id)
+	return err
+}
+
+func (s *AdminDataService) GetSiteProject(ctx context.Context, id int64) (*models.SiteProject, error) {
+	rows, err := database.QueryCtx(ctx, s.db, `SELECT id,name,summary,description,cover_url,demo_url,repo_url,stack_tags,status,is_featured,sort_order,published_at,created_at,updated_at FROM site_projects WHERE id=$1`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, sql.ErrNoRows
+	}
+	item, err := scanSiteProject(rows)
+	return &item, err
+}
+
+func (s *AdminDataService) ListSiteTimelineEvents(ctx context.Context, page, pageSize int, status string) ([]models.SiteTimelineEvent, int64, error) {
+	where := "WHERE 1=1"
+	countArgs := []any{}
+	if strings.TrimSpace(status) != "" {
+		where += " AND status=$1"
+		countArgs = append(countArgs, status)
+	}
+	var total int64
+	if err := database.QueryRowCtx(ctx, s.db, `SELECT COUNT(*) FROM site_timeline_events `+where, countArgs...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	limit, offset := normalizePagination(page, pageSize)
+	listWhere := "WHERE 1=1"
+	args := []any{limit, offset}
+	if strings.TrimSpace(status) != "" {
+		listWhere += " AND status=$3"
+		args = append(args, status)
+	}
+	rows, err := database.QueryCtx(ctx, s.db, siteTimelineSelect()+` FROM site_timeline_events `+listWhere+` ORDER BY is_featured DESC,sort_order ASC,happened_at DESC,id DESC LIMIT $1 OFFSET $2`, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	items := make([]models.SiteTimelineEvent, 0)
+	for rows.Next() {
+		item, err := scanSiteTimelineEvent(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		items = append(items, item)
+	}
+	return items, total, rows.Err()
+}
+
+func (s *AdminDataService) SaveSiteTimelineEvent(ctx context.Context, id int64, input SiteTimelineEventInput) (*models.SiteTimelineEvent, error) {
+	status := strings.TrimSpace(input.Status)
+	if status == "" {
+		status = "draft"
+	}
+	eventType := strings.TrimSpace(input.EventType)
+	if eventType == "" {
+		eventType = "learning"
+	}
+	publishedAt := input.PublishedAt
+	if status == "published" && publishedAt == nil {
+		now := time.Now()
+		publishedAt = &now
+	}
+	if id == 0 {
+		var newID int64
+		query := database.RewriteSQL(`INSERT INTO site_timeline_events(title,summary,content,phase,event_type,tags,link_url,status,is_featured,sort_order,happened_at,published_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`)
+		args := []any{strings.TrimSpace(input.Title), input.Summary, input.Content, input.Phase, eventType, input.Tags, input.LinkURL, status, input.IsFeatured, input.SortOrder, input.HappenedAt, publishedAt}
+		if database.CurrentDialect.SupportsReturning() {
+			if err := s.db.QueryRowContext(ctx, query, args...).Scan(&newID); err != nil {
+				return nil, err
+			}
+		} else {
+			result, err := s.db.ExecContext(ctx, strings.Replace(query, " RETURNING id", "", -1), args...)
+			if err != nil {
+				return nil, err
+			}
+			newID, _ = result.LastInsertId()
+		}
+		return s.GetSiteTimelineEvent(ctx, newID)
+	}
+	_, err := database.ExecCtx(ctx, s.db, `UPDATE site_timeline_events SET title=$1,summary=$2,content=$3,phase=$4,event_type=$5,tags=$6,link_url=$7,status=$8,is_featured=$9,sort_order=$10,happened_at=$11,published_at=$12,updated_at=`+database.Now()+` WHERE id=$13`, strings.TrimSpace(input.Title), input.Summary, input.Content, input.Phase, eventType, input.Tags, input.LinkURL, status, input.IsFeatured, input.SortOrder, input.HappenedAt, publishedAt, id)
+	if err != nil {
+		return nil, err
+	}
+	return s.GetSiteTimelineEvent(ctx, id)
+}
+
+func (s *AdminDataService) DeleteSiteTimelineEvent(ctx context.Context, id int64) error {
+	_, err := database.ExecCtx(ctx, s.db, `DELETE FROM site_timeline_events WHERE id=$1`, id)
+	return err
+}
+
+func (s *AdminDataService) GetSiteTimelineEvent(ctx context.Context, id int64) (*models.SiteTimelineEvent, error) {
+	rows, err := database.QueryCtx(ctx, s.db, siteTimelineSelect()+` FROM site_timeline_events WHERE id=$1`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, sql.ErrNoRows
+	}
+	item, err := scanSiteTimelineEvent(rows)
+	return &item, err
+}
+
+func (s *AdminDataService) ListSiteMessages(ctx context.Context, page, pageSize int, status string) ([]models.SiteMessage, int64, error) {
+	where := "WHERE 1=1"
+	args := []any{}
+	if strings.TrimSpace(status) != "" {
+		where += " AND status=$1"
+		args = append(args, status)
+	}
+	if status == "approved" {
+		where += " AND is_public=TRUE"
+	}
+	var total int64
+	if err := database.QueryRowCtx(ctx, s.db, `SELECT COUNT(*) FROM site_messages `+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	limit, offset := normalizePagination(page, pageSize)
+	listArgs := []any{limit, offset}
+	listWhere := "WHERE 1=1"
+	if strings.TrimSpace(status) != "" {
+		listWhere += " AND status=$3"
+		listArgs = append(listArgs, status)
+	}
+	if status == "approved" {
+		listWhere += " AND is_public=TRUE"
+	}
+	rows, err := database.QueryCtx(ctx, s.db, `SELECT id,visitor_name,email,content,reply,status,is_public,ip_address,user_agent,created_at,updated_at FROM site_messages `+listWhere+` ORDER BY id DESC LIMIT $1 OFFSET $2`, listArgs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	items := make([]models.SiteMessage, 0)
+	for rows.Next() {
+		item, err := scanSiteMessage(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		items = append(items, item)
+	}
+	return items, total, rows.Err()
+}
+
+func (s *AdminDataService) CreateSiteMessage(ctx context.Context, input SiteMessageInput) (*models.SiteMessage, error) {
+	name := strings.TrimSpace(input.VisitorName)
+	if name == "" {
+		name = "匿名访客"
+	}
+	content := strings.TrimSpace(input.Content)
+	if content == "" {
+		return nil, fmt.Errorf("content is required")
+	}
+	var id int64
+	query := database.RewriteSQL(`INSERT INTO site_messages(visitor_name,email,content,status,is_public,ip_address,user_agent) VALUES($1,$2,$3,'pending',TRUE,$4,$5) RETURNING id`)
+	args := []any{name, strings.TrimSpace(input.Email), content, input.IPAddress, input.UserAgent}
+	if database.CurrentDialect.SupportsReturning() {
+		if err := s.db.QueryRowContext(ctx, query, args...).Scan(&id); err != nil {
+			return nil, err
+		}
+	} else {
+		result, err := s.db.ExecContext(ctx, strings.Replace(query, " RETURNING id", "", -1), args...)
+		if err != nil {
+			return nil, err
+		}
+		id, _ = result.LastInsertId()
+	}
+	item, err := s.GetSiteMessage(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	_ = s.CreateReviewNotification(ctx, "Website message pending review", "Visitor "+name+" submitted a new message.", "/site-admin/content?tab=messages")
+	return item, nil
+}
+
+func (s *AdminDataService) SaveSiteMessage(ctx context.Context, id int64, input SiteMessageInput) (*models.SiteMessage, error) {
+	status := strings.TrimSpace(input.Status)
+	if status == "" {
+		status = "pending"
+	}
+	_, err := database.ExecCtx(ctx, s.db, `UPDATE site_messages SET visitor_name=$1,email=$2,content=$3,reply=$4,status=$5,is_public=$6,updated_at=`+database.Now()+` WHERE id=$7`, strings.TrimSpace(input.VisitorName), strings.TrimSpace(input.Email), strings.TrimSpace(input.Content), strings.TrimSpace(input.Reply), status, input.IsPublic, id)
+	if err != nil {
+		return nil, err
+	}
+	return s.GetSiteMessage(ctx, id)
+}
+
+func (s *AdminDataService) DeleteSiteMessage(ctx context.Context, id int64) error {
+	_, err := database.ExecCtx(ctx, s.db, `DELETE FROM site_messages WHERE id=$1`, id)
+	return err
+}
+
+func (s *AdminDataService) GetSiteMessage(ctx context.Context, id int64) (*models.SiteMessage, error) {
+	rows, err := database.QueryCtx(ctx, s.db, `SELECT id,visitor_name,email,content,reply,status,is_public,ip_address,user_agent,created_at,updated_at FROM site_messages WHERE id=$1`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, sql.ErrNoRows
+	}
+	item, err := scanSiteMessage(rows)
+	return &item, err
+}
+
+func (s *AdminDataService) RecordSiteVisit(ctx context.Context, input SiteVisitInput) error {
+	path := strings.TrimSpace(input.Path)
+	if path == "" {
+		path = "/"
+	}
+	device := strings.TrimSpace(input.Device)
+	if device == "" {
+		device = "desktop"
+	}
+	_, err := database.ExecCtx(ctx, s.db, `INSERT INTO site_visits(path,referrer,device,ip_address,user_agent) VALUES($1,$2,$3,$4,$5)`, path, strings.TrimSpace(input.Referrer), device, input.IPAddress, input.UserAgent)
+	return err
+}
+
+func (s *AdminDataService) PublicSiteStats(ctx context.Context) (*models.SitePublicStats, error) {
+	stats := &models.SitePublicStats{}
+	_ = database.QueryRowCtx(ctx, s.db, `SELECT COUNT(*) FROM site_visits`).Scan(&stats.VisitCount)
+	_ = database.QueryRowCtx(ctx, s.db, `SELECT COUNT(*) FROM site_resources WHERE status='published'`).Scan(&stats.ArticleCount)
+	_ = database.QueryRowCtx(ctx, s.db, `SELECT COUNT(*) FROM site_messages WHERE status='approved' AND is_public=TRUE`).Scan(&stats.MessageCount)
+	return stats, nil
+}
+
+func (s *AdminDataService) SiteAnalytics(ctx context.Context) (*models.SiteAnalytics, error) {
+	out := &models.SiteAnalytics{}
+	_ = database.QueryRowCtx(ctx, s.db, `SELECT COUNT(*) FROM site_visits`).Scan(&out.VisitCount)
+	_ = database.QueryRowCtx(ctx, s.db, `SELECT COUNT(*) FROM site_visits WHERE created_at >= $1`, time.Now().Add(-24*time.Hour)).Scan(&out.TodayVisits)
+	_ = database.QueryRowCtx(ctx, s.db, `SELECT COUNT(*) FROM site_resources WHERE status='published'`).Scan(&out.ArticleCount)
+	_ = database.QueryRowCtx(ctx, s.db, `SELECT COUNT(*) FROM site_messages`).Scan(&out.MessageCount)
+	_ = database.QueryRowCtx(ctx, s.db, `SELECT COUNT(*) FROM site_messages WHERE status='pending'`).Scan(&out.PendingMessages)
+
+	dayExpr := "DATE(created_at)"
+	if database.CurrentDialect.Type == database.DBTypePostgres {
+		dayExpr = "TO_CHAR(created_at, 'YYYY-MM-DD')"
+	}
+	rows, err := database.QueryCtx(ctx, s.db, `SELECT `+dayExpr+`,COUNT(*) FROM site_visits WHERE created_at >= $1 GROUP BY `+dayExpr+` ORDER BY `+dayExpr+` ASC`, time.Now().AddDate(0, 0, -6))
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var item models.SiteVisitBucket
+			if rows.Scan(&item.Date, &item.Visits) == nil {
+				out.VisitsByDay = append(out.VisitsByDay, item)
+			}
+		}
+	}
+	topRows, err := database.QueryCtx(ctx, s.db, `SELECT path,COUNT(*) FROM site_visits GROUP BY path ORDER BY COUNT(*) DESC LIMIT 8`)
+	if err == nil {
+		defer topRows.Close()
+		for topRows.Next() {
+			var item models.SiteVisitTopPage
+			if topRows.Scan(&item.Path, &item.Visits) == nil {
+				out.TopPages = append(out.TopPages, item)
+			}
+		}
+	}
+	deviceRows, err := database.QueryCtx(ctx, s.db, `SELECT device,COUNT(*) FROM site_visits GROUP BY device ORDER BY COUNT(*) DESC`)
+	if err == nil {
+		defer deviceRows.Close()
+		for deviceRows.Next() {
+			var item models.SiteVisitDevice
+			if deviceRows.Scan(&item.Device, &item.Visits) == nil {
+				out.DeviceStats = append(out.DeviceStats, item)
+			}
+		}
+	}
+	topArticles, _, err := s.ListSiteResources(ctx, 1, 6, "published")
+	if err == nil {
+		sort.Slice(topArticles, func(i, j int) bool { return topArticles[i].ViewCount > topArticles[j].ViewCount })
+		out.TopArticles = topArticles
+	}
+	return out, nil
+}
+
+func (s *AdminDataService) AskSiteKnowledge(ctx context.Context, question string) (*models.SiteKnowledgeAnswer, error) {
+	question = strings.TrimSpace(question)
+	if question == "" {
+		return &models.SiteKnowledgeAnswer{Question: question, Answer: "可以问我关于 React、Go、数据库、项目经验或学习笔记的问题。"}, nil
+	}
+	resources, _, err := s.ListSiteResources(ctx, 1, 80, "published")
+	if err != nil {
+		return nil, err
+	}
+	projects, _, err := s.ListSiteProjects(ctx, 1, 40, "published")
+	if err != nil {
+		return nil, err
+	}
+	terms := tokenizeQuery(question)
+	type resourceScore struct {
+		item  models.SiteResource
+		score int
+	}
+	scored := make([]resourceScore, 0)
+	for _, item := range resources {
+		haystack := strings.ToLower(strings.Join([]string{item.Title, item.Summary, item.Content, item.MarkdownContent, item.Category, item.Tags}, " "))
+		score := scoreText(haystack, terms)
+		if score > 0 {
+			scored = append(scored, resourceScore{item: item, score: score})
+		}
+	}
+	sort.Slice(scored, func(i, j int) bool { return scored[i].score > scored[j].score })
+	matches := make([]models.SiteResource, 0)
+	for i, item := range scored {
+		if i >= 4 {
+			break
+		}
+		matches = append(matches, item.item)
+	}
+	relatedProjects := make([]models.SiteProject, 0)
+	for _, item := range projects {
+		haystack := strings.ToLower(strings.Join([]string{item.Name, item.Summary, item.Description, item.StackTags}, " "))
+		if scoreText(haystack, terms) > 0 {
+			relatedProjects = append(relatedProjects, item)
+		}
+		if len(relatedProjects) >= 3 {
+			break
+		}
+	}
+	answer := "暂时没有在已发布内容里找到强相关资料。你可以换一个关键词，比如 React、Go、数据库或项目复盘。"
+	if len(matches) > 0 {
+		titles := make([]string, 0, len(matches))
+		for _, item := range matches {
+			titles = append(titles, item.Title)
+		}
+		answer = "我从你的已发布内容里找到了这些相关笔记：" + strings.Join(titles, "、") + "。可以先从第一篇开始看，再顺着标签继续查。"
+	}
+	return &models.SiteKnowledgeAnswer{Question: question, Answer: answer, Matches: matches, Projects: relatedProjects}, nil
+}
+
 func (s *AdminDataService) dashboardTrend(ctx context.Context) ([]models.DashboardMetric, error) {
 	out := make([]models.DashboardMetric, 0, 7)
 	start := time.Now().AddDate(0, 0, -6)
@@ -335,6 +1219,66 @@ func scanNotification(rows *sql.Rows) (models.Notification, error) {
 	}
 	if readAt.Valid {
 		item.ReadAt = &readAt.Time
+	}
+	return item, err
+}
+
+func scanSiteAnnouncement(rows *sql.Rows) (models.SiteAnnouncement, error) {
+	var item models.SiteAnnouncement
+	var startsAt, endsAt sql.NullTime
+	err := rows.Scan(&item.ID, &item.Title, &item.Content, &item.LinkURL, &item.IsActive, &item.SortOrder, &startsAt, &endsAt, &item.CreatedAt, &item.UpdatedAt)
+	if startsAt.Valid {
+		item.StartsAt = &startsAt.Time
+	}
+	if endsAt.Valid {
+		item.EndsAt = &endsAt.Time
+	}
+	return item, err
+}
+
+func scanSiteResource(rows *sql.Rows) (models.SiteResource, error) {
+	var item models.SiteResource
+	var publishedAt sql.NullTime
+	err := rows.Scan(&item.ID, &item.Title, &item.Slug, &item.Summary, &item.Content, &item.MarkdownContent, &item.Category, &item.CoverURL, &item.LinkURL, &item.Tags, &item.SEOTitle, &item.SEODescription, &item.SEOKeywords, &item.Status, &item.IsFeatured, &item.ViewCount, &item.SortOrder, &publishedAt, &item.CreatedAt, &item.UpdatedAt)
+	if publishedAt.Valid {
+		item.PublishedAt = &publishedAt.Time
+	}
+	return item, err
+}
+
+func scanSiteMessage(rows *sql.Rows) (models.SiteMessage, error) {
+	var item models.SiteMessage
+	err := rows.Scan(&item.ID, &item.VisitorName, &item.Email, &item.Content, &item.Reply, &item.Status, &item.IsPublic, &item.IPAddress, &item.UserAgent, &item.CreatedAt, &item.UpdatedAt)
+	return item, err
+}
+
+func siteResourceSelect() string {
+	return `SELECT id,title,slug,summary,content,markdown_content,category,cover_url,link_url,tags,seo_title,seo_description,seo_keywords,status,is_featured,view_count,sort_order,published_at,created_at,updated_at`
+}
+
+func siteTimelineSelect() string {
+	return `SELECT id,title,summary,content,phase,event_type,tags,link_url,status,is_featured,sort_order,happened_at,published_at,created_at,updated_at`
+}
+
+func scanSiteProject(rows *sql.Rows) (models.SiteProject, error) {
+	var item models.SiteProject
+	var publishedAt sql.NullTime
+	err := rows.Scan(&item.ID, &item.Name, &item.Summary, &item.Description, &item.CoverURL, &item.DemoURL, &item.RepoURL, &item.StackTags, &item.Status, &item.IsFeatured, &item.SortOrder, &publishedAt, &item.CreatedAt, &item.UpdatedAt)
+	if publishedAt.Valid {
+		item.PublishedAt = &publishedAt.Time
+	}
+	return item, err
+}
+
+func scanSiteTimelineEvent(rows *sql.Rows) (models.SiteTimelineEvent, error) {
+	var item models.SiteTimelineEvent
+	var happenedAt, publishedAt sql.NullTime
+	err := rows.Scan(&item.ID, &item.Title, &item.Summary, &item.Content, &item.Phase, &item.EventType, &item.Tags, &item.LinkURL, &item.Status, &item.IsFeatured, &item.SortOrder, &happenedAt, &publishedAt, &item.CreatedAt, &item.UpdatedAt)
+	if happenedAt.Valid {
+		item.HappenedAt = &happenedAt.Time
+	}
+	if publishedAt.Valid {
+		item.PublishedAt = &publishedAt.Time
 	}
 	return item, err
 }
@@ -400,6 +1344,8 @@ func permissionLabel(code string) string {
 		"ai:assistant":        "AI 助手",
 		"health:read":         "系统健康监控",
 		"database:read":       "数据库表结构",
+		"site:read":           "官网管理",
+		"site:write":          "官网内容写入",
 	}
 	if label, ok := labels[code]; ok {
 		return label
@@ -454,6 +1400,8 @@ func menuForPermission(code string) models.PermissionTreeNode {
 		return models.PermissionTreeNode{ID: "/system-tools/health", Label: "系统健康监控", Type: "menu"}
 	case "database:read":
 		return models.PermissionTreeNode{ID: "/system-tools/database", Label: "数据库表结构", Type: "menu"}
+	case "site:read":
+		return models.PermissionTreeNode{ID: "/site-admin/content", Label: "官网管理", Type: "menu"}
 	default:
 		return models.PermissionTreeNode{}
 	}
@@ -745,4 +1693,68 @@ func joinTopCounts(values map[string]int64, limit int) string {
 		parts = append(parts, fmt.Sprintf("%s %d 次", item.key, item.value))
 	}
 	return strings.Join(parts, "，")
+}
+
+func slugify(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return fmt.Sprintf("post-%d", time.Now().Unix())
+	}
+	var b strings.Builder
+	lastDash := false
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if r > 127 {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash && b.Len() > 0 {
+			b.WriteRune('-')
+			lastDash = true
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		return fmt.Sprintf("post-%d", time.Now().Unix())
+	}
+	runes := []rune(out)
+	if len(runes) > 160 {
+		return string(runes[:160])
+	}
+	return out
+}
+
+func tokenizeQuery(value string) []string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	replacer := strings.NewReplacer(",", " ", "，", " ", ".", " ", "。", " ", "?", " ", "？", " ", "\n", " ", "\t", " ")
+	value = replacer.Replace(value)
+	parts := strings.Fields(value)
+	out := make([]string, 0, len(parts))
+	seen := map[string]bool{}
+	for _, part := range parts {
+		if part == "" || seen[part] {
+			continue
+		}
+		seen[part] = true
+		out = append(out, part)
+	}
+	if len(out) == 0 && value != "" {
+		out = append(out, value)
+	}
+	return out
+}
+
+func scoreText(haystack string, terms []string) int {
+	score := 0
+	for _, term := range terms {
+		if term != "" && strings.Contains(haystack, term) {
+			score += 3
+		}
+	}
+	return score
 }

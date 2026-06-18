@@ -4,7 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
+	"time"
 
 	"go-demo/services"
 
@@ -57,11 +61,213 @@ type askAssistantRequest struct {
 	Question string `json:"question" form:"question"`
 }
 
+type siteKnowledgeRequest struct {
+	Question string `json:"question" form:"question"`
+}
+
+type siteVisitRequest struct {
+	Path     string `json:"path" form:"path"`
+	Referrer string `json:"referrer" form:"referrer"`
+	Device   string `json:"device" form:"device"`
+}
+
 type databaseTablesQuery struct {
 	Database string `form:"database"`
 	Table    string `form:"table"`
 	Engine   string `form:"engine"`
 	Comment  string `form:"comment"`
+}
+
+type siteListQuery struct {
+	Status string `form:"status"`
+}
+
+type siteAnnouncementRequest struct {
+	Title     string     `json:"title" form:"title" binding:"required"`
+	Content   string     `json:"content" form:"content"`
+	LinkURL   string     `json:"link_url" form:"link_url"`
+	IsActive  bool       `json:"is_active" form:"is_active"`
+	SortOrder int        `json:"sort_order" form:"sort_order"`
+	StartsAt  *time.Time `json:"starts_at" form:"starts_at"`
+	EndsAt    *time.Time `json:"ends_at" form:"ends_at"`
+}
+
+type siteBannerRequest struct {
+	Title     string `json:"title" form:"title" binding:"required"`
+	Subtitle  string `json:"subtitle" form:"subtitle"`
+	ImageURL  string `json:"image_url" form:"image_url"`
+	LinkURL   string `json:"link_url" form:"link_url"`
+	IsActive  bool   `json:"is_active" form:"is_active"`
+	SortOrder int    `json:"sort_order" form:"sort_order"`
+}
+
+type siteResourceRequest struct {
+	Title           string     `json:"title" form:"title" binding:"required"`
+	Slug            string     `json:"slug" form:"slug"`
+	Summary         string     `json:"summary" form:"summary"`
+	Content         string     `json:"content" form:"content"`
+	MarkdownContent string     `json:"markdown_content" form:"markdown_content"`
+	Category        string     `json:"category" form:"category"`
+	CoverURL        string     `json:"cover_url" form:"cover_url"`
+	LinkURL         string     `json:"link_url" form:"link_url"`
+	Tags            string     `json:"tags" form:"tags"`
+	SEOTitle        string     `json:"seo_title" form:"seo_title"`
+	SEODescription  string     `json:"seo_description" form:"seo_description"`
+	SEOKeywords     string     `json:"seo_keywords" form:"seo_keywords"`
+	Status          string     `json:"status" form:"status"`
+	IsFeatured      bool       `json:"is_featured" form:"is_featured"`
+	SortOrder       int        `json:"sort_order" form:"sort_order"`
+	PublishedAt     *time.Time `json:"published_at" form:"published_at"`
+}
+
+type siteTechStackRequest struct {
+	Name        string `json:"name" form:"name" binding:"required"`
+	Category    string `json:"category" form:"category"`
+	Level       int    `json:"level" form:"level"`
+	IconURL     string `json:"icon_url" form:"icon_url"`
+	Description string `json:"description" form:"description"`
+	IsActive    bool   `json:"is_active" form:"is_active"`
+	SortOrder   int    `json:"sort_order" form:"sort_order"`
+}
+
+type siteProjectRequest struct {
+	Name        string     `json:"name" form:"name" binding:"required"`
+	Summary     string     `json:"summary" form:"summary"`
+	Description string     `json:"description" form:"description"`
+	CoverURL    string     `json:"cover_url" form:"cover_url"`
+	DemoURL     string     `json:"demo_url" form:"demo_url"`
+	RepoURL     string     `json:"repo_url" form:"repo_url"`
+	StackTags   string     `json:"stack_tags" form:"stack_tags"`
+	Status      string     `json:"status" form:"status"`
+	IsFeatured  bool       `json:"is_featured" form:"is_featured"`
+	SortOrder   int        `json:"sort_order" form:"sort_order"`
+	PublishedAt *time.Time `json:"published_at" form:"published_at"`
+}
+
+type siteTimelineEventRequest struct {
+	Title       string     `json:"title" form:"title" binding:"required"`
+	Summary     string     `json:"summary" form:"summary"`
+	Content     string     `json:"content" form:"content"`
+	Phase       string     `json:"phase" form:"phase"`
+	EventType   string     `json:"event_type" form:"event_type"`
+	Tags        string     `json:"tags" form:"tags"`
+	LinkURL     string     `json:"link_url" form:"link_url"`
+	Status      string     `json:"status" form:"status"`
+	IsFeatured  bool       `json:"is_featured" form:"is_featured"`
+	SortOrder   int        `json:"sort_order" form:"sort_order"`
+	HappenedAt  *time.Time `json:"happened_at" form:"happened_at"`
+	PublishedAt *time.Time `json:"published_at" form:"published_at"`
+}
+
+type siteMessageRequest struct {
+	VisitorName string `json:"visitor_name" form:"visitor_name"`
+	Email       string `json:"email" form:"email"`
+	Content     string `json:"content" form:"content" binding:"required"`
+	Reply       string `json:"reply" form:"reply"`
+	Status      string `json:"status" form:"status"`
+	IsPublic    bool   `json:"is_public" form:"is_public"`
+}
+
+func siteAnnouncementInput(req siteAnnouncementRequest) services.SiteAnnouncementInput {
+	return services.SiteAnnouncementInput{
+		Title:     strings.TrimSpace(req.Title),
+		Content:   strings.TrimSpace(req.Content),
+		LinkURL:   strings.TrimSpace(req.LinkURL),
+		IsActive:  req.IsActive,
+		SortOrder: req.SortOrder,
+		StartsAt:  req.StartsAt,
+		EndsAt:    req.EndsAt,
+	}
+}
+
+func siteBannerInput(req siteBannerRequest) services.SiteBannerInput {
+	return services.SiteBannerInput{
+		Title:     strings.TrimSpace(req.Title),
+		Subtitle:  strings.TrimSpace(req.Subtitle),
+		ImageURL:  strings.TrimSpace(req.ImageURL),
+		LinkURL:   strings.TrimSpace(req.LinkURL),
+		IsActive:  req.IsActive,
+		SortOrder: req.SortOrder,
+	}
+}
+
+func siteResourceInput(req siteResourceRequest) services.SiteResourceInput {
+	return services.SiteResourceInput{
+		Title:           strings.TrimSpace(req.Title),
+		Slug:            strings.TrimSpace(req.Slug),
+		Summary:         strings.TrimSpace(req.Summary),
+		Content:         strings.TrimSpace(req.Content),
+		MarkdownContent: strings.TrimSpace(req.MarkdownContent),
+		Category:        strings.TrimSpace(req.Category),
+		CoverURL:        strings.TrimSpace(req.CoverURL),
+		LinkURL:         strings.TrimSpace(req.LinkURL),
+		Tags:            strings.TrimSpace(req.Tags),
+		SEOTitle:        strings.TrimSpace(req.SEOTitle),
+		SEODescription:  strings.TrimSpace(req.SEODescription),
+		SEOKeywords:     strings.TrimSpace(req.SEOKeywords),
+		Status:          strings.TrimSpace(req.Status),
+		IsFeatured:      req.IsFeatured,
+		SortOrder:       req.SortOrder,
+		PublishedAt:     req.PublishedAt,
+	}
+}
+
+func siteTechStackInput(req siteTechStackRequest) services.SiteTechStackInput {
+	return services.SiteTechStackInput{
+		Name:        strings.TrimSpace(req.Name),
+		Category:    strings.TrimSpace(req.Category),
+		Level:       req.Level,
+		IconURL:     strings.TrimSpace(req.IconURL),
+		Description: strings.TrimSpace(req.Description),
+		IsActive:    req.IsActive,
+		SortOrder:   req.SortOrder,
+	}
+}
+
+func siteProjectInput(req siteProjectRequest) services.SiteProjectInput {
+	return services.SiteProjectInput{
+		Name:        strings.TrimSpace(req.Name),
+		Summary:     strings.TrimSpace(req.Summary),
+		Description: strings.TrimSpace(req.Description),
+		CoverURL:    strings.TrimSpace(req.CoverURL),
+		DemoURL:     strings.TrimSpace(req.DemoURL),
+		RepoURL:     strings.TrimSpace(req.RepoURL),
+		StackTags:   strings.TrimSpace(req.StackTags),
+		Status:      strings.TrimSpace(req.Status),
+		IsFeatured:  req.IsFeatured,
+		SortOrder:   req.SortOrder,
+		PublishedAt: req.PublishedAt,
+	}
+}
+
+func siteTimelineEventInput(req siteTimelineEventRequest) services.SiteTimelineEventInput {
+	return services.SiteTimelineEventInput{
+		Title:       strings.TrimSpace(req.Title),
+		Summary:     strings.TrimSpace(req.Summary),
+		Content:     strings.TrimSpace(req.Content),
+		Phase:       strings.TrimSpace(req.Phase),
+		EventType:   strings.TrimSpace(req.EventType),
+		Tags:        strings.TrimSpace(req.Tags),
+		LinkURL:     strings.TrimSpace(req.LinkURL),
+		Status:      strings.TrimSpace(req.Status),
+		IsFeatured:  req.IsFeatured,
+		SortOrder:   req.SortOrder,
+		HappenedAt:  req.HappenedAt,
+		PublishedAt: req.PublishedAt,
+	}
+}
+
+func siteMessageInput(req siteMessageRequest, g *gin.Context) services.SiteMessageInput {
+	return services.SiteMessageInput{
+		VisitorName: strings.TrimSpace(req.VisitorName),
+		Email:       strings.TrimSpace(req.Email),
+		Content:     strings.TrimSpace(req.Content),
+		Reply:       strings.TrimSpace(req.Reply),
+		Status:      strings.TrimSpace(req.Status),
+		IsPublic:    req.IsPublic,
+		IPAddress:   g.ClientIP(),
+		UserAgent:   g.Request.UserAgent(),
+	}
 }
 
 // ──────────────────────────────────────────────
@@ -469,6 +675,450 @@ func (c *AdminController) ListDatabaseColumns(g *gin.Context) {
 	g.JSON(http.StatusOK, gin.H{"columns": columns})
 }
 
+func (c *AdminController) PublicSiteHome(g *gin.Context) {
+	home, err := c.adminData.PublicSiteHome(g.Request.Context())
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load site home"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"home": home})
+}
+
+func (c *AdminController) PublicSiteResource(g *gin.Context) {
+	item, err := c.adminData.GetSiteResourceBySlug(g.Request.Context(), g.Param("slug"))
+	if err != nil {
+		g.JSON(http.StatusNotFound, gin.H{"error": "resource not found"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"resource": item})
+}
+
+func (c *AdminController) PublicSiteKnowledge(g *gin.Context) {
+	var req siteKnowledgeRequest
+	if err := bindRequest(g, &req); err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	answer, err := c.adminData.AskSiteKnowledge(g.Request.Context(), req.Question)
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to search knowledge base"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"answer": answer})
+}
+
+func (c *AdminController) PublicSiteMessage(g *gin.Context) {
+	var req siteMessageRequest
+	if err := bindRequest(g, &req); err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	item, err := c.adminData.CreateSiteMessage(g.Request.Context(), siteMessageInput(req, g))
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create message"})
+		return
+	}
+	g.JSON(http.StatusCreated, gin.H{"message": item})
+}
+
+func (c *AdminController) PublicSiteVisit(g *gin.Context) {
+	var req siteVisitRequest
+	if err := bindRequest(g, &req); err != nil {
+		g.Status(http.StatusNoContent)
+		return
+	}
+	_ = c.adminData.RecordSiteVisit(g.Request.Context(), services.SiteVisitInput{
+		Path:      strings.TrimSpace(req.Path),
+		Referrer:  strings.TrimSpace(req.Referrer),
+		Device:    normalizeDevice(req.Device, g.Request.UserAgent()),
+		IPAddress: g.ClientIP(),
+		UserAgent: g.Request.UserAgent(),
+	})
+	g.Status(http.StatusNoContent)
+}
+
+func (c *AdminController) ListSiteAnnouncements(g *gin.Context) {
+	page, pageSize := parsePaginationQuery(g)
+	items, total, err := c.adminData.ListSiteAnnouncements(g.Request.Context(), page, pageSize, g.Query("status"))
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list announcements"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"announcements": items, "total": total, "page": page, "page_size": pageSize})
+}
+
+func (c *AdminController) CreateSiteAnnouncement(g *gin.Context) {
+	var req siteAnnouncementRequest
+	if err := bindRequest(g, &req); err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	item, err := c.adminData.CreateSiteAnnouncement(g.Request.Context(), siteAnnouncementInput(req))
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create announcement"})
+		return
+	}
+	c.logAction(g, "创建官网公告", "官网管理", item.Title)
+	g.JSON(http.StatusCreated, gin.H{"announcement": item})
+}
+
+func (c *AdminController) UpdateSiteAnnouncement(g *gin.Context) {
+	id, ok := parseIDParam(g, "id")
+	if !ok {
+		return
+	}
+	var req siteAnnouncementRequest
+	if err := bindRequest(g, &req); err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	item, err := c.adminData.UpdateSiteAnnouncement(g.Request.Context(), id, siteAnnouncementInput(req))
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update announcement"})
+		return
+	}
+	c.logAction(g, "编辑官网公告", "官网管理", item.Title)
+	g.JSON(http.StatusOK, gin.H{"announcement": item})
+}
+
+func (c *AdminController) DeleteSiteAnnouncement(g *gin.Context) {
+	id, ok := parseIDParam(g, "id")
+	if !ok {
+		return
+	}
+	if err := c.adminData.DeleteSiteAnnouncement(g.Request.Context(), id); err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete announcement"})
+		return
+	}
+	c.logAction(g, "删除官网公告", "官网管理", fmt.Sprintf("公告ID：%d", id))
+	g.Status(http.StatusNoContent)
+}
+
+func (c *AdminController) ListSiteBanners(g *gin.Context) {
+	page, pageSize := parsePaginationQuery(g)
+	items, total, err := c.adminData.ListSiteBanners(g.Request.Context(), page, pageSize, g.Query("status"))
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list banners"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"banners": items, "total": total, "page": page, "page_size": pageSize})
+}
+
+func (c *AdminController) CreateSiteBanner(g *gin.Context) {
+	var req siteBannerRequest
+	if err := bindRequest(g, &req); err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	item, err := c.adminData.CreateSiteBanner(g.Request.Context(), siteBannerInput(req))
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create banner"})
+		return
+	}
+	c.logAction(g, "创建官网轮播", "官网管理", item.Title)
+	g.JSON(http.StatusCreated, gin.H{"banner": item})
+}
+
+func (c *AdminController) UpdateSiteBanner(g *gin.Context) {
+	id, ok := parseIDParam(g, "id")
+	if !ok {
+		return
+	}
+	var req siteBannerRequest
+	if err := bindRequest(g, &req); err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	item, err := c.adminData.UpdateSiteBanner(g.Request.Context(), id, siteBannerInput(req))
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update banner"})
+		return
+	}
+	c.logAction(g, "编辑官网轮播", "官网管理", item.Title)
+	g.JSON(http.StatusOK, gin.H{"banner": item})
+}
+
+func (c *AdminController) DeleteSiteBanner(g *gin.Context) {
+	id, ok := parseIDParam(g, "id")
+	if !ok {
+		return
+	}
+	if err := c.adminData.DeleteSiteBanner(g.Request.Context(), id); err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete banner"})
+		return
+	}
+	c.logAction(g, "删除官网轮播", "官网管理", fmt.Sprintf("轮播ID：%d", id))
+	g.Status(http.StatusNoContent)
+}
+
+func (c *AdminController) ListSiteResources(g *gin.Context) {
+	page, pageSize := parsePaginationQuery(g)
+	items, total, err := c.adminData.ListSiteResources(g.Request.Context(), page, pageSize, g.Query("status"))
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list resources"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"resources": items, "total": total, "page": page, "page_size": pageSize})
+}
+
+func (c *AdminController) SaveSiteResource(g *gin.Context) {
+	id := int64(0)
+	if raw := g.Param("id"); raw != "" {
+		parsed, ok := parseIDParam(g, "id")
+		if !ok {
+			return
+		}
+		id = parsed
+	}
+	var req siteResourceRequest
+	if err := bindRequest(g, &req); err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	item, err := c.adminData.SaveSiteResource(g.Request.Context(), id, siteResourceInput(req))
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save resource"})
+		return
+	}
+	c.logAction(g, "保存官网资源", "官网管理", item.Title)
+	g.JSON(http.StatusOK, gin.H{"resource": item})
+}
+
+func (c *AdminController) DeleteSiteResource(g *gin.Context) {
+	id, ok := parseIDParam(g, "id")
+	if !ok {
+		return
+	}
+	if err := c.adminData.DeleteSiteResource(g.Request.Context(), id); err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete resource"})
+		return
+	}
+	c.logAction(g, "删除官网资源", "官网管理", fmt.Sprintf("资源ID：%d", id))
+	g.Status(http.StatusNoContent)
+}
+
+func (c *AdminController) ListSiteTechStacks(g *gin.Context) {
+	page, pageSize := parsePaginationQuery(g)
+	items, total, err := c.adminData.ListSiteTechStacks(g.Request.Context(), page, pageSize, g.Query("status"))
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list tech stacks"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"tech_stacks": items, "total": total, "page": page, "page_size": pageSize})
+}
+
+func (c *AdminController) SaveSiteTechStack(g *gin.Context) {
+	id := int64(0)
+	if raw := g.Param("id"); raw != "" {
+		parsed, ok := parseIDParam(g, "id")
+		if !ok {
+			return
+		}
+		id = parsed
+	}
+	var req siteTechStackRequest
+	if err := bindRequest(g, &req); err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	item, err := c.adminData.SaveSiteTechStack(g.Request.Context(), id, siteTechStackInput(req))
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save tech stack"})
+		return
+	}
+	c.logAction(g, "保存官网技术栈", "官网管理", item.Name)
+	g.JSON(http.StatusOK, gin.H{"tech_stack": item})
+}
+
+func (c *AdminController) DeleteSiteTechStack(g *gin.Context) {
+	id, ok := parseIDParam(g, "id")
+	if !ok {
+		return
+	}
+	if err := c.adminData.DeleteSiteTechStack(g.Request.Context(), id); err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete tech stack"})
+		return
+	}
+	c.logAction(g, "删除官网技术栈", "官网管理", fmt.Sprintf("技术栈ID：%d", id))
+	g.Status(http.StatusNoContent)
+}
+
+func (c *AdminController) ListSiteProjects(g *gin.Context) {
+	page, pageSize := parsePaginationQuery(g)
+	items, total, err := c.adminData.ListSiteProjects(g.Request.Context(), page, pageSize, g.Query("status"))
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list projects"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"projects": items, "total": total, "page": page, "page_size": pageSize})
+}
+
+func (c *AdminController) SaveSiteProject(g *gin.Context) {
+	id := int64(0)
+	if raw := g.Param("id"); raw != "" {
+		parsed, ok := parseIDParam(g, "id")
+		if !ok {
+			return
+		}
+		id = parsed
+	}
+	var req siteProjectRequest
+	if err := bindRequest(g, &req); err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	item, err := c.adminData.SaveSiteProject(g.Request.Context(), id, siteProjectInput(req))
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save project"})
+		return
+	}
+	c.logAction(g, "保存官网项目", "官网管理", item.Name)
+	g.JSON(http.StatusOK, gin.H{"project": item})
+}
+
+func (c *AdminController) DeleteSiteProject(g *gin.Context) {
+	id, ok := parseIDParam(g, "id")
+	if !ok {
+		return
+	}
+	if err := c.adminData.DeleteSiteProject(g.Request.Context(), id); err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete project"})
+		return
+	}
+	c.logAction(g, "删除官网项目", "官网管理", fmt.Sprintf("项目ID：%d", id))
+	g.Status(http.StatusNoContent)
+}
+
+func (c *AdminController) ListSiteTimelineEvents(g *gin.Context) {
+	page, pageSize := parsePaginationQuery(g)
+	items, total, err := c.adminData.ListSiteTimelineEvents(g.Request.Context(), page, pageSize, g.Query("status"))
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list timeline events"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"timeline": items, "total": total, "page": page, "page_size": pageSize})
+}
+
+func (c *AdminController) SaveSiteTimelineEvent(g *gin.Context) {
+	id := int64(0)
+	if raw := g.Param("id"); raw != "" {
+		parsed, ok := parseIDParam(g, "id")
+		if !ok {
+			return
+		}
+		id = parsed
+	}
+	var req siteTimelineEventRequest
+	if err := bindRequest(g, &req); err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	item, err := c.adminData.SaveSiteTimelineEvent(g.Request.Context(), id, siteTimelineEventInput(req))
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save timeline event"})
+		return
+	}
+	c.logAction(g, "保存官网时间轴", "官网管理", item.Title)
+	g.JSON(http.StatusOK, gin.H{"timeline_event": item})
+}
+
+func (c *AdminController) DeleteSiteTimelineEvent(g *gin.Context) {
+	id, ok := parseIDParam(g, "id")
+	if !ok {
+		return
+	}
+	if err := c.adminData.DeleteSiteTimelineEvent(g.Request.Context(), id); err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete timeline event"})
+		return
+	}
+	c.logAction(g, "删除官网时间轴", "官网管理", fmt.Sprintf("时间轴ID：%d", id))
+	g.Status(http.StatusNoContent)
+}
+
+func (c *AdminController) ListSiteMessages(g *gin.Context) {
+	page, pageSize := parsePaginationQuery(g)
+	items, total, err := c.adminData.ListSiteMessages(g.Request.Context(), page, pageSize, g.Query("status"))
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list messages"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"messages": items, "total": total, "page": page, "page_size": pageSize})
+}
+
+func (c *AdminController) SaveSiteMessage(g *gin.Context) {
+	id, ok := parseIDParam(g, "id")
+	if !ok {
+		return
+	}
+	var req siteMessageRequest
+	if err := bindRequest(g, &req); err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	item, err := c.adminData.SaveSiteMessage(g.Request.Context(), id, siteMessageInput(req, g))
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save message"})
+		return
+	}
+	c.logAction(g, "处理官网留言", "官网管理", item.Content)
+	g.JSON(http.StatusOK, gin.H{"message": item})
+}
+
+func (c *AdminController) DeleteSiteMessage(g *gin.Context) {
+	id, ok := parseIDParam(g, "id")
+	if !ok {
+		return
+	}
+	if err := c.adminData.DeleteSiteMessage(g.Request.Context(), id); err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete message"})
+		return
+	}
+	c.logAction(g, "删除官网留言", "官网管理", fmt.Sprintf("留言ID：%d", id))
+	g.Status(http.StatusNoContent)
+}
+
+func (c *AdminController) SiteAnalytics(g *gin.Context) {
+	analytics, err := c.adminData.SiteAnalytics(g.Request.Context())
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load site analytics"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"analytics": analytics})
+}
+
+func (c *AdminController) UploadSiteAsset(g *gin.Context) {
+	fh, err := g.FormFile("file")
+	if err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"error": "missing file"})
+		return
+	}
+	if fh.Size <= 0 || fh.Size > 10<<20 {
+		g.JSON(http.StatusBadRequest, gin.H{"error": "file too large"})
+		return
+	}
+	ext := strings.ToLower(filepath.Ext(fh.Filename))
+	allowed := map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".webp": true, ".gif": true, ".svg": true}
+	if !allowed[ext] {
+		g.JSON(http.StatusBadRequest, gin.H{"error": "unsupported file type"})
+		return
+	}
+	name := fmt.Sprintf("%d%s", time.Now().UnixNano(), ext)
+	dateDir := time.Now().Format("20060102")
+	dir := filepath.Join("uploads", "site", dateDir)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create upload dir"})
+		return
+	}
+	path := filepath.Join(dir, name)
+	if err := g.SaveUploadedFile(fh, path); err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save file"})
+		return
+	}
+	url := "/" + filepath.ToSlash(path)
+	c.logAction(g, "上传官网资源", "官网管理", url)
+	g.JSON(http.StatusOK, gin.H{"url": url})
+}
+
 func parsePaginationQuery(g *gin.Context) (int, int) {
 	page := 1
 	pageSize := 10
@@ -487,6 +1137,21 @@ func parsePaginationQuery(g *gin.Context) (int, int) {
 		pageSize = 100
 	}
 	return page, pageSize
+}
+
+func normalizeDevice(value, ua string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "mobile" || value == "tablet" || value == "desktop" {
+		return value
+	}
+	lowerUA := strings.ToLower(ua)
+	if strings.Contains(lowerUA, "ipad") || strings.Contains(lowerUA, "tablet") {
+		return "tablet"
+	}
+	if strings.Contains(lowerUA, "mobile") || strings.Contains(lowerUA, "android") || strings.Contains(lowerUA, "iphone") {
+		return "mobile"
+	}
+	return "desktop"
 }
 
 func adminCurrentUserID(g *gin.Context) int64 {

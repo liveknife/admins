@@ -140,6 +140,128 @@ export type DatabaseColumn = {
   primary_key: boolean;
 };
 
+export type SiteAnnouncement = {
+  id: number;
+  title: string;
+  content: string;
+  link_url: string;
+  is_active: boolean;
+  sort_order: number;
+  starts_at?: string;
+  ends_at?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SiteBanner = {
+  id: number;
+  title: string;
+  subtitle: string;
+  image_url: string;
+  link_url: string;
+  is_active: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SiteResource = {
+  id: number;
+  title: string;
+  slug: string;
+  summary: string;
+  content: string;
+  markdown_content: string;
+  category: string;
+  cover_url: string;
+  link_url: string;
+  tags: string;
+  seo_title: string;
+  seo_description: string;
+  seo_keywords: string;
+  status: string;
+  is_featured: boolean;
+  view_count: number;
+  sort_order: number;
+  published_at?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SiteTechStack = {
+  id: number;
+  name: string;
+  category: string;
+  level: number;
+  icon_url: string;
+  description: string;
+  is_active: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SiteProject = {
+  id: number;
+  name: string;
+  summary: string;
+  description: string;
+  cover_url: string;
+  demo_url: string;
+  repo_url: string;
+  stack_tags: string;
+  status: string;
+  is_featured: boolean;
+  sort_order: number;
+  published_at?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SiteTimelineEvent = {
+  id: number;
+  title: string;
+  summary: string;
+  content: string;
+  phase: string;
+  event_type: string;
+  tags: string;
+  link_url: string;
+  status: string;
+  is_featured: boolean;
+  sort_order: number;
+  happened_at?: string;
+  published_at?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SiteMessage = {
+  id: number;
+  visitor_name: string;
+  email: string;
+  content: string;
+  reply: string;
+  status: string;
+  is_public: boolean;
+  ip_address: string;
+  user_agent: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SiteAnalytics = {
+  visit_count: number;
+  today_visits: number;
+  article_count: number;
+  message_count: number;
+  pending_messages: number;
+  visits_by_day: Array<{ date: string; visits: number }>;
+  top_pages: Array<{ path: string; visits: number }>;
+  device_stats: Array<{ device: string; visits: number }>;
+  top_articles: SiteResource[];
+};
+
 export type RolePayload = {
   name: string;
   description?: string;
@@ -353,4 +475,184 @@ export const getDatabaseColumns = (table: string, database?: string) => {
     `/api/v1/admin/database/tables/${encodeURIComponent(table)}/columns`,
     { params: { database } }
   );
+};
+
+export const getSiteAnnouncements = (
+  params?: PageParams & { status?: string }
+) => {
+  return http.request<PagedResult<"announcements", SiteAnnouncement>>(
+    "get",
+    "/api/v1/admin/site/announcements",
+    { params }
+  );
+};
+
+export const saveSiteAnnouncement = (
+  data: Partial<SiteAnnouncement>,
+  id?: number
+) => {
+  return http.request<{ announcement: SiteAnnouncement }>(
+    id ? "put" : "post",
+    id
+      ? `/api/v1/admin/site/announcements/${id}`
+      : "/api/v1/admin/site/announcements",
+    { data }
+  );
+};
+
+export const deleteSiteAnnouncement = (id: number) => {
+  return http.request<void>(
+    "delete",
+    `/api/v1/admin/site/announcements/${id}`
+  );
+};
+
+export const getSiteBanners = (params?: PageParams & { status?: string }) => {
+  return http.request<PagedResult<"banners", SiteBanner>>(
+    "get",
+    "/api/v1/admin/site/banners",
+    { params }
+  );
+};
+
+export const saveSiteBanner = (data: Partial<SiteBanner>, id?: number) => {
+  return http.request<{ banner: SiteBanner }>(
+    id ? "put" : "post",
+    id ? `/api/v1/admin/site/banners/${id}` : "/api/v1/admin/site/banners",
+    { data }
+  );
+};
+
+export const deleteSiteBanner = (id: number) => {
+  return http.request<void>("delete", `/api/v1/admin/site/banners/${id}`);
+};
+
+export const getSiteResources = (params?: PageParams & { status?: string }) => {
+  return http.request<PagedResult<"resources", SiteResource>>(
+    "get",
+    "/api/v1/admin/site/resources",
+    { params }
+  );
+};
+
+export const saveSiteResource = (data: Partial<SiteResource>, id?: number) => {
+  return http.request<{ resource: SiteResource }>(
+    id ? "put" : "post",
+    id ? `/api/v1/admin/site/resources/${id}` : "/api/v1/admin/site/resources",
+    { data }
+  );
+};
+
+export const deleteSiteResource = (id: number) => {
+  return http.request<void>("delete", `/api/v1/admin/site/resources/${id}`);
+};
+
+export const getSiteTechStacks = (
+  params?: PageParams & { status?: string }
+) => {
+  return http.request<PagedResult<"tech_stacks", SiteTechStack>>(
+    "get",
+    "/api/v1/admin/site/tech-stacks",
+    { params }
+  );
+};
+
+export const saveSiteTechStack = (
+  data: Partial<SiteTechStack>,
+  id?: number
+) => {
+  return http.request<{ tech_stack: SiteTechStack }>(
+    id ? "put" : "post",
+    id
+      ? `/api/v1/admin/site/tech-stacks/${id}`
+      : "/api/v1/admin/site/tech-stacks",
+    { data }
+  );
+};
+
+export const deleteSiteTechStack = (id: number) => {
+  return http.request<void>("delete", `/api/v1/admin/site/tech-stacks/${id}`);
+};
+
+export const getSiteProjects = (params?: PageParams & { status?: string }) => {
+  return http.request<PagedResult<"projects", SiteProject>>(
+    "get",
+    "/api/v1/admin/site/projects",
+    { params }
+  );
+};
+
+export const saveSiteProject = (data: Partial<SiteProject>, id?: number) => {
+  return http.request<{ project: SiteProject }>(
+    id ? "put" : "post",
+    id ? `/api/v1/admin/site/projects/${id}` : "/api/v1/admin/site/projects",
+    { data }
+  );
+};
+
+export const deleteSiteProject = (id: number) => {
+  return http.request<void>("delete", `/api/v1/admin/site/projects/${id}`);
+};
+
+export const getSiteTimelineEvents = (
+  params?: PageParams & { status?: string }
+) => {
+  return http.request<PagedResult<"timeline", SiteTimelineEvent>>(
+    "get",
+    "/api/v1/admin/site/timeline",
+    { params }
+  );
+};
+
+export const saveSiteTimelineEvent = (
+  data: Partial<SiteTimelineEvent>,
+  id?: number
+) => {
+  return http.request<{ timeline_event: SiteTimelineEvent }>(
+    id ? "put" : "post",
+    id ? `/api/v1/admin/site/timeline/${id}` : "/api/v1/admin/site/timeline",
+    { data }
+  );
+};
+
+export const deleteSiteTimelineEvent = (id: number) => {
+  return http.request<void>("delete", `/api/v1/admin/site/timeline/${id}`);
+};
+
+export const getSiteMessages = (params?: PageParams & { status?: string }) => {
+  return http.request<PagedResult<"messages", SiteMessage>>(
+    "get",
+    "/api/v1/admin/site/messages",
+    { params }
+  );
+};
+
+export const saveSiteMessage = (data: Partial<SiteMessage>, id: number) => {
+  return http.request<{ message: SiteMessage }>(
+    "put",
+    `/api/v1/admin/site/messages/${id}`,
+    { data }
+  );
+};
+
+export const deleteSiteMessage = (id: number) => {
+  return http.request<void>("delete", `/api/v1/admin/site/messages/${id}`);
+};
+
+export const getSiteAnalytics = () => {
+  return http.request<{ analytics: SiteAnalytics }>(
+    "get",
+    "/api/v1/admin/site/analytics"
+  );
+};
+
+export const uploadSiteAsset = (file: File) => {
+  const formData = new FormData();
+  formData.append("file", file);
+  return http.request<{ url: string }>("post", "/api/v1/admin/site/upload", {
+    data: formData,
+    headers: {
+      "Content-Type": "multipart/form-data"
+    }
+  });
 };
