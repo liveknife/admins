@@ -15,9 +15,11 @@ report.html
 .eslintcache
 tsconfig.tsbuildinfo
 .claude/
+.agents/
 admin/.git.pure-admin-backup/
 .codex-tmp/
 .tmp/
+.cache/
 .pnpm-store/
 .pnpm-home/
 .gocache/
