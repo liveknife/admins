@@ -1,0 +1,32 @@
+packages:
+  - .
+
+allowedDeprecatedVersions:
+  are-we-there-yet: "*"
+  sourcemap-codec: "*"
+  lodash.isequal: "*"
+  domexception: "*"
+  w3c-hr-time: "*"
+  inflight: "*"
+  npmlog: "*"
+  rimraf: "*"
+  stable: "*"
+  gauge: "*"
+  abab: "*"
+  glob: "*"
+
+onlyBuiltDependencies:
+  - "@parcel/watcher"
+  - core-js
+  - es5-ext
+  - esbuild
+  - typeit
+  - vue-demi
+
+ignoredBuiltDependencies:
+  - "@tailwindcss/oxide"
+
+allowBuilds:
+  '@parcel/watcher': true
+  esbuild: true
+  vue-demi: true

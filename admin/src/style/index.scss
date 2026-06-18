@@ -1,0 +1,89 @@
+@use "theme";
+@use "transition";
+@use "element-plus";
+@use "sidebar";
+@use "dark";
+
+/* 自定义全局 CssVar */
+:root {
+  /* 左侧菜单展开、收起动画时长 */
+  --pure-transition-duration: 0.3s;
+
+  /* 常用border-color 需要时可取用 */
+  --pure-border-color: rgb(5 5 5 / 6%);
+
+  /* switch关闭状态下的color 需要时可取用 */
+  --pure-switch-off-color: #a6a6a6;
+
+  /** 主题色 */
+  --pure-theme-sub-menu-active-text: initial;
+  --pure-theme-menu-bg: none;
+  --pure-theme-menu-hover: none;
+  --pure-theme-sub-menu-bg: transparent;
+  --pure-theme-menu-text: initial;
+  --pure-theme-sidebar-logo: none;
+  --pure-theme-menu-title-hover: initial;
+  --pure-theme-menu-active-before: transparent;
+
+  --app-bg: #f5f7fb;
+  --app-bg-soft: #eef4ff;
+  --app-surface: #ffffff;
+  --app-surface-soft: #f8fbff;
+  --app-surface-muted: #f1f5f9;
+  --app-border: #e3eaf3;
+  --app-border-soft: #edf2f7;
+  --app-text: #162033;
+  --app-text-secondary: #59677a;
+  --app-text-muted: #8a97aa;
+  --app-primary: #2f6bff;
+  --app-primary-strong: #1d4ed8;
+  --app-cyan: #09b6d7;
+  --app-green: #16a679;
+  --app-violet: #7c5cff;
+  --app-orange: #f59e0b;
+  --app-red: #ef4444;
+  --app-shadow: 0 14px 36px rgb(33 49 77 / 8%);
+  --app-shadow-soft: 0 8px 22px rgb(33 49 77 / 6%);
+}
+
+html,
+body,
+#app {
+  background: var(--app-bg);
+}
+
+body {
+  color: var(--app-text);
+}
+
+html.dark {
+  --app-bg: #09111e;
+  --app-bg-soft: #0d1a2b;
+  --app-surface: #101b2a;
+  --app-surface-soft: #132235;
+  --app-surface-muted: #17263a;
+  --app-border: #24364c;
+  --app-border-soft: #1c2b3d;
+  --app-text: #edf5ff;
+  --app-text-secondary: #a6b6ca;
+  --app-text-muted: #73849a;
+  --app-primary: #5b8cff;
+  --app-primary-strong: #8db0ff;
+  --app-cyan: #2dd4f7;
+  --app-green: #34d399;
+  --app-violet: #a78bfa;
+  --app-orange: #fbbf24;
+  --app-red: #fb7185;
+  --app-shadow: 0 18px 46px rgb(0 0 0 / 24%);
+  --app-shadow-soft: 0 10px 28px rgb(0 0 0 / 18%);
+}
+
+/* 灰色模式 */
+.html-grey {
+  filter: grayscale(100%);
+}
+
+/* 色弱模式 */
+.html-weakness {
+  filter: invert(80%);
+}

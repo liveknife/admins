@@ -1,0 +1,41 @@
+﻿# Dependencies
+node_modules/
+
+# Environment files
+.env
+.env.*
+!go_demo/.env.example
+
+# Build output
+dist/
+dist-ssr/
+report.html
+
+# Local cache
+.eslintcache
+tsconfig.tsbuildinfo
+.codex-tmp/
+.tmp/
+.pnpm-store/
+.pnpm-home/
+.gocache/
+.gocache-test/
+tmp/
+
+# Runtime output
+uploads/
+*.exe
+*.test
+coverage.out
+*.log
+*.db
+app.db
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
