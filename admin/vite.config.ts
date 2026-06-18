@@ -30,10 +30,20 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
       host: "0.0.0.0",
       // 本地跨域代理 https://cn.vitejs.dev/config/server-options.html#server-proxy
       proxy: {
-        "/api": {
+        "/api/v1/chat/ws": {
           target: VITE_API_PROXY_TARGET || "http://localhost:8080",
           changeOrigin: true,
-          ws: true
+          ws: true,
+          configure: proxy => {
+            proxy.on("error", err => {
+              if ((err as NodeJS.ErrnoException).code === "ECONNRESET") return;
+              console.warn("[vite proxy] websocket error:", err.message);
+            });
+          }
+        },
+        "/api": {
+          target: VITE_API_PROXY_TARGET || "http://localhost:8080",
+          changeOrigin: true
         },
         "/uploads": {
           target: VITE_API_PROXY_TARGET || "http://localhost:8080",

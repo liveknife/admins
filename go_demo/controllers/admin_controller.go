@@ -57,6 +57,13 @@ type askAssistantRequest struct {
 	Question string `json:"question" form:"question"`
 }
 
+type databaseTablesQuery struct {
+	Database string `form:"database"`
+	Table    string `form:"table"`
+	Engine   string `form:"engine"`
+	Comment  string `form:"comment"`
+}
+
 // ──────────────────────────────────────────────
 // 用户管理
 // ──────────────────────────────────────────────
@@ -426,6 +433,40 @@ func (c *AdminController) AskAssistant(g *gin.Context) {
 
 func (c *AdminController) SystemHealth(g *gin.Context) {
 	g.JSON(http.StatusOK, gin.H{"health": c.monitor.Health()})
+}
+
+func (c *AdminController) DatabaseCatalog(g *gin.Context) {
+	catalog, err := c.adminData.DatabaseCatalog(g.Request.Context())
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load database catalog"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"catalog": catalog})
+}
+
+func (c *AdminController) ListDatabaseTables(g *gin.Context) {
+	var req databaseTablesQuery
+	if err := g.ShouldBindQuery(&req); err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	tables, err := c.adminData.ListDatabaseTables(g.Request.Context(), req.Database, req.Table, req.Engine, req.Comment)
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list database tables"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"tables": tables})
+}
+
+func (c *AdminController) ListDatabaseColumns(g *gin.Context) {
+	databaseName := g.Query("database")
+	tableName := g.Param("table")
+	columns, err := c.adminData.ListDatabaseColumns(g.Request.Context(), databaseName, tableName)
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load table columns"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"columns": columns})
 }
 
 func parsePaginationQuery(g *gin.Context) (int, int) {

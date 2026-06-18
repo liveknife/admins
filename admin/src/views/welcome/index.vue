@@ -42,21 +42,21 @@ const summaryCards = computed(() => [
   {
     label: "活跃用户",
     value: dashboard.value?.active_user_count ?? 0,
-    icon: "ri:user-smile-line",
+    icon: "ri:user-heart-line",
     tone: "green",
     hint: "可用账号"
   },
   {
     label: "消息总量",
     value: dashboard.value?.message_count ?? 0,
-    icon: "ri:chat-3-line",
+    icon: "ri:bubble-chart-line",
     tone: "violet",
     hint: "聊天消息"
   },
   {
     label: "未读通知",
     value: dashboard.value?.unread_notification ?? 0,
-    icon: "ri:notification-3-line",
+    icon: "ri:alarm-warning-line",
     tone: "orange",
     hint: "等待处理"
   }
@@ -115,11 +115,13 @@ const chartTheme = () => {
     tooltipBorder: dark ? "#2c4058" : "#dbe5f0",
     tooltipText: dark ? "#edf5ff" : "#162033",
     panel: dark ? "#101b2a" : "#ffffff",
-    cyan: dark ? "#2dd4f7" : "#09b6d7",
-    green: dark ? "#34d399" : "#16a679",
-    violet: dark ? "#a78bfa" : "#7c5cff",
-    orange: dark ? "#fbbf24" : "#f59e0b",
-    red: dark ? "#fb7185" : "#ef4444"
+    cyan: dark ? "#22d3ee" : "#0891b2",
+    blue: dark ? "#60a5fa" : "#2563eb",
+    green: dark ? "#34d399" : "#059669",
+    violet: dark ? "#8b8efb" : "#6266d9",
+    orange: dark ? "#fbbf24" : "#d97706",
+    red: dark ? "#f87171" : "#dc2626",
+    track: dark ? "rgba(148, 163, 184, 0.14)" : "rgba(148, 163, 184, 0.22)"
   };
 };
 
@@ -192,7 +194,7 @@ const buildCompositionOption = () => {
   const data = dashboard.value;
   const theme = chartTheme();
   return {
-    color: [theme.cyan, theme.green, theme.orange, theme.red],
+    color: [theme.cyan, theme.green, theme.orange, theme.blue],
     tooltip: { trigger: "item", ...baseTooltip() },
     legend: { bottom: 0, left: "center", textStyle: baseText(), itemWidth: 10, itemHeight: 10 },
     series: [
@@ -259,7 +261,7 @@ const buildOperationsOption = () => {
 const buildNotificationsOption = () => {
   const theme = chartTheme();
   return {
-  color: [theme.red, theme.green],
+  color: [theme.orange, theme.green],
   tooltip: { trigger: "item", ...baseTooltip() },
   series: [
     {
@@ -308,16 +310,17 @@ const buildScoreOption = () => {
         show: true,
         width: 14,
         roundCap: true,
-        itemStyle: { color: theme.cyan }
+        itemStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 1, 1, [
+            { offset: 0, color: theme.blue },
+            { offset: 1, color: theme.cyan }
+          ])
+        }
       },
       axisLine: {
         lineStyle: {
           width: 14,
-          color: [
-            [0.72, isDarkTheme() ? "rgba(251, 113, 133, 0.24)" : "rgba(239, 68, 68, 0.16)"],
-            [0.9, isDarkTheme() ? "rgba(251, 191, 36, 0.24)" : "rgba(245, 158, 11, 0.16)"],
-            [1, isDarkTheme() ? "rgba(45, 212, 247, 0.24)" : "rgba(9, 182, 215, 0.16)"]
-          ]
+          color: [[1, theme.track]]
         }
       },
       axisTick: { show: false },
@@ -422,7 +425,7 @@ onBeforeUnmount(() => {
     <section class="metric-grid">
       <article v-for="item in summaryCards" :key="item.label" class="metric-card" :class="`tone-${item.tone}`">
         <div class="metric-icon">
-          <i :class="item.icon" />
+          <IconifyIconOnline :icon="item.icon" />
         </div>
         <div class="metric-body">
           <span>{{ item.label }}</span>
@@ -663,20 +666,51 @@ onBeforeUnmount(() => {
   }
 }
 
-.tone-cyan { --card-accent: var(--app-cyan); }
-.tone-green { --card-accent: var(--app-green); }
-.tone-violet { --card-accent: var(--app-violet); }
-.tone-orange { --card-accent: var(--app-orange); }
+.tone-cyan { --card-accent: var(--app-cyan); --card-accent-strong: #0891b2; }
+.tone-green { --card-accent: var(--app-green); --card-accent-strong: #059669; }
+.tone-violet { --card-accent: var(--app-violet); --card-accent-strong: #6266d9; }
+.tone-orange { --card-accent: var(--app-orange); --card-accent-strong: #d97706; }
+
+:global(html.dark) {
+  .tone-cyan { --card-accent-strong: #67e8f9; }
+  .tone-green { --card-accent-strong: #6ee7b7; }
+  .tone-violet { --card-accent-strong: #c4b5fd; }
+  .tone-orange { --card-accent-strong: #fde68a; }
+}
 
 .metric-icon {
-  width: 48px;
-  height: 48px;
+  position: relative;
+  width: 54px;
+  height: 54px;
   display: grid;
   place-items: center;
-  border-radius: 8px;
-  color: var(--card-accent);
-  font-size: 24px;
-  background: color-mix(in srgb, var(--card-accent) 14%, transparent);
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--card-accent) 34%, transparent);
+  border-radius: 14px;
+  color: var(--card-accent-strong);
+  font-size: 27px;
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--card-accent) 18%, transparent), transparent 72%),
+    color-mix(in srgb, var(--app-surface) 88%, var(--card-accent) 12%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 62%, transparent),
+    0 14px 26px color-mix(in srgb, var(--card-accent) 14%, transparent);
+
+  &::after {
+    content: "";
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--card-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--card-accent) 13%, transparent);
+  }
+
+  :deep(svg) {
+    display: block;
+  }
 }
 
 .metric-body {

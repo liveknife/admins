@@ -125,6 +125,31 @@ type SystemHealth struct {
 	CheckedAt time.Time       `json:"checked_at"`
 }
 
+type DatabaseCatalog struct {
+	CurrentDatabase string   `json:"current_database"`
+	Databases       []string `json:"databases"`
+	Engines         []string `json:"engines"`
+}
+
+type DatabaseTable struct {
+	Name      string     `json:"name"`
+	Engine    string     `json:"engine"`
+	Collation string     `json:"collation"`
+	Rows      int64      `json:"rows"`
+	IndexSize string     `json:"index_size"`
+	Comment   string     `json:"comment"`
+	CreatedAt *time.Time `json:"created_at,omitempty"`
+}
+
+type DatabaseColumn struct {
+	Name       string `json:"name"`
+	Type       string `json:"type"`
+	NotNull    bool   `json:"not_null"`
+	Default    string `json:"default"`
+	Comment    string `json:"comment"`
+	PrimaryKey bool   `json:"primary_key"`
+}
+
 type HealthMetric struct {
 	Value float64 `json:"value"`
 	Unit  string  `json:"unit"`

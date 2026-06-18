@@ -238,6 +238,72 @@ func (s *AdminDataService) MarkAllNotificationsRead(ctx context.Context, userID 
 	return err
 }
 
+func (s *AdminDataService) DatabaseCatalog(ctx context.Context) (*models.DatabaseCatalog, error) {
+	current, err := s.currentDatabase(ctx)
+	if err != nil {
+		return nil, err
+	}
+	catalog := &models.DatabaseCatalog{
+		CurrentDatabase: current,
+		Databases:       []string{current},
+		Engines:         []string{},
+	}
+	if database.CurrentDialect.Type != database.DBTypeMySQL {
+		catalog.Engines = []string{"PostgreSQL"}
+		return catalog, nil
+	}
+	rows, err := database.QueryCtx(ctx, s.db, `SELECT DISTINCT engine FROM information_schema.tables WHERE table_schema=$1 AND engine IS NOT NULL ORDER BY engine`, current)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var engine string
+		if err := rows.Scan(&engine); err != nil {
+			return nil, err
+		}
+		catalog.Engines = append(catalog.Engines, engine)
+	}
+	return catalog, rows.Err()
+}
+
+func (s *AdminDataService) ListDatabaseTables(ctx context.Context, dbName, tableName, engine, comment string) ([]models.DatabaseTable, error) {
+	current, err := s.currentDatabase(ctx)
+	if err != nil {
+		return nil, err
+	}
+	dbName = strings.TrimSpace(dbName)
+	if dbName == "" {
+		dbName = current
+	}
+	if dbName != current {
+		return []models.DatabaseTable{}, nil
+	}
+	if database.CurrentDialect.Type == database.DBTypeMySQL {
+		return s.listMySQLTables(ctx, dbName, tableName, engine, comment)
+	}
+	return s.listPostgresTables(ctx, tableName, comment)
+}
+
+func (s *AdminDataService) ListDatabaseColumns(ctx context.Context, dbName, tableName string) ([]models.DatabaseColumn, error) {
+	current, err := s.currentDatabase(ctx)
+	if err != nil {
+		return nil, err
+	}
+	dbName = strings.TrimSpace(dbName)
+	tableName = strings.TrimSpace(tableName)
+	if dbName == "" {
+		dbName = current
+	}
+	if dbName != current || tableName == "" {
+		return []models.DatabaseColumn{}, nil
+	}
+	if database.CurrentDialect.Type == database.DBTypeMySQL {
+		return s.listMySQLColumns(ctx, dbName, tableName)
+	}
+	return s.listPostgresColumns(ctx, tableName)
+}
+
 func (s *AdminDataService) dashboardTrend(ctx context.Context) ([]models.DashboardMetric, error) {
 	out := make([]models.DashboardMetric, 0, 7)
 	start := time.Now().AddDate(0, 0, -6)
@@ -333,6 +399,7 @@ func permissionLabel(code string) string {
 		"notifications:write": "通知写入操作",
 		"ai:assistant":        "AI 助手",
 		"health:read":         "系统健康监控",
+		"database:read":       "数据库表结构",
 	}
 	if label, ok := labels[code]; ok {
 		return label
@@ -385,6 +452,8 @@ func menuForPermission(code string) models.PermissionTreeNode {
 		return models.PermissionTreeNode{ID: "/system-tools/ai-assistant", Label: "AI 助手", Type: "menu"}
 	case "health:read":
 		return models.PermissionTreeNode{ID: "/system-tools/health", Label: "系统健康监控", Type: "menu"}
+	case "database:read":
+		return models.PermissionTreeNode{ID: "/system-tools/database", Label: "数据库表结构", Type: "menu"}
 	default:
 		return models.PermissionTreeNode{}
 	}
@@ -501,6 +570,155 @@ func (s *AdminDataService) loginFailureRows(ctx context.Context) ([]map[string]a
 		out = append(out, map[string]any{"user": username, "failures": count, "last_time": lastTime})
 	}
 	return out, rows.Err()
+}
+
+func (s *AdminDataService) currentDatabase(ctx context.Context) (string, error) {
+	var name string
+	query := `SELECT current_database()`
+	if database.CurrentDialect.Type == database.DBTypeMySQL {
+		query = `SELECT DATABASE()`
+	}
+	if err := database.QueryRowCtx(ctx, s.db, query).Scan(&name); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+func (s *AdminDataService) listMySQLTables(ctx context.Context, dbName, tableName, engine, comment string) ([]models.DatabaseTable, error) {
+	where := []string{`table_schema=$1`}
+	args := []any{dbName}
+	if strings.TrimSpace(tableName) != "" {
+		args = append(args, "%"+strings.TrimSpace(tableName)+"%")
+		where = append(where, fmt.Sprintf(`table_name LIKE $%d`, len(args)))
+	}
+	if strings.TrimSpace(engine) != "" {
+		args = append(args, strings.TrimSpace(engine))
+		where = append(where, fmt.Sprintf(`engine=$%d`, len(args)))
+	}
+	if strings.TrimSpace(comment) != "" {
+		args = append(args, "%"+strings.TrimSpace(comment)+"%")
+		where = append(where, fmt.Sprintf(`table_comment LIKE $%d`, len(args)))
+	}
+	rows, err := database.QueryCtx(ctx, s.db,
+		`SELECT table_name,COALESCE(engine,''),COALESCE(table_collation,''),COALESCE(table_rows,0),COALESCE(index_length,0),COALESCE(table_comment,''),create_time FROM information_schema.tables WHERE `+
+			strings.Join(where, " AND ")+` ORDER BY table_name ASC`,
+		args...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]models.DatabaseTable, 0)
+	for rows.Next() {
+		var item models.DatabaseTable
+		var indexBytes int64
+		var createdAt sql.NullTime
+		if err := rows.Scan(&item.Name, &item.Engine, &item.Collation, &item.Rows, &indexBytes, &item.Comment, &createdAt); err != nil {
+			return nil, err
+		}
+		item.IndexSize = formatBytes(indexBytes)
+		if createdAt.Valid {
+			item.CreatedAt = &createdAt.Time
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (s *AdminDataService) listPostgresTables(ctx context.Context, tableName, comment string) ([]models.DatabaseTable, error) {
+	where := []string{`t.table_schema='public'`, `t.table_type='BASE TABLE'`}
+	args := []any{}
+	if strings.TrimSpace(tableName) != "" {
+		args = append(args, "%"+strings.TrimSpace(tableName)+"%")
+		where = append(where, fmt.Sprintf(`t.table_name ILIKE $%d`, len(args)))
+	}
+	if strings.TrimSpace(comment) != "" {
+		args = append(args, "%"+strings.TrimSpace(comment)+"%")
+		where = append(where, fmt.Sprintf(`COALESCE(obj_description(c.oid),'') ILIKE $%d`, len(args)))
+	}
+	rows, err := database.QueryCtx(ctx, s.db,
+		`SELECT t.table_name,'PostgreSQL','public',GREATEST(COALESCE(c.reltuples,0),0)::BIGINT,pg_indexes_size(c.oid),COALESCE(obj_description(c.oid),'') FROM information_schema.tables t JOIN pg_class c ON c.relname=t.table_name JOIN pg_namespace n ON n.oid=c.relnamespace AND n.nspname=t.table_schema WHERE `+
+			strings.Join(where, " AND ")+` ORDER BY t.table_name ASC`,
+		args...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]models.DatabaseTable, 0)
+	for rows.Next() {
+		var item models.DatabaseTable
+		var indexBytes int64
+		if err := rows.Scan(&item.Name, &item.Engine, &item.Collation, &item.Rows, &indexBytes, &item.Comment); err != nil {
+			return nil, err
+		}
+		item.IndexSize = formatBytes(indexBytes)
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (s *AdminDataService) listMySQLColumns(ctx context.Context, dbName, tableName string) ([]models.DatabaseColumn, error) {
+	rows, err := database.QueryCtx(ctx, s.db,
+		`SELECT column_name,column_type,is_nullable,COALESCE(column_default,''),COALESCE(column_comment,''),column_key FROM information_schema.columns WHERE table_schema=$1 AND table_name=$2 ORDER BY ordinal_position ASC`,
+		dbName, tableName,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]models.DatabaseColumn, 0)
+	for rows.Next() {
+		var item models.DatabaseColumn
+		var nullable, key string
+		if err := rows.Scan(&item.Name, &item.Type, &nullable, &item.Default, &item.Comment, &key); err != nil {
+			return nil, err
+		}
+		item.NotNull = strings.EqualFold(nullable, "NO")
+		item.PrimaryKey = key == "PRI"
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (s *AdminDataService) listPostgresColumns(ctx context.Context, tableName string) ([]models.DatabaseColumn, error) {
+	rows, err := database.QueryCtx(ctx, s.db,
+		`SELECT a.attname,format_type(a.atttypid,a.atttypmod),a.attnotnull,COALESCE(pg_get_expr(ad.adbin,ad.adrelid),''),COALESCE(col_description(a.attrelid,a.attnum),''),COALESCE(i.indisprimary,false) FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace LEFT JOIN pg_attrdef ad ON ad.adrelid=a.attrelid AND ad.adnum=a.attnum LEFT JOIN pg_index i ON i.indrelid=a.attrelid AND a.attnum=ANY(i.indkey) AND i.indisprimary WHERE n.nspname='public' AND c.relname=$1 AND a.attnum>0 AND NOT a.attisdropped ORDER BY a.attnum ASC`,
+		tableName,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]models.DatabaseColumn, 0)
+	for rows.Next() {
+		var item models.DatabaseColumn
+		if err := rows.Scan(&item.Name, &item.Type, &item.NotNull, &item.Default, &item.Comment, &item.PrimaryKey); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func formatBytes(value int64) string {
+	if value <= 0 {
+		return "0KB"
+	}
+	units := []string{"B", "KB", "MB", "GB", "TB"}
+	size := float64(value)
+	unit := 0
+	for size >= 1024 && unit < len(units)-1 {
+		size /= 1024
+		unit++
+	}
+	if unit == 0 {
+		return fmt.Sprintf("%d%s", value, units[unit])
+	}
+	if size >= 10 {
+		return fmt.Sprintf("%.0f%s", size, units[unit])
+	}
+	return fmt.Sprintf("%.1f%s", size, units[unit])
 }
 
 func joinTopCounts(values map[string]int64, limit int) string {

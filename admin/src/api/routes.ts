@@ -96,6 +96,19 @@ const buildAdminRoutes = (user: GoUser) => {
     });
   }
 
+  if (hasAdminAccess && permissions.includes("database:read")) {
+    toolChildren.push({
+      path: "/system-tools/database",
+      component: "system-tools/database/index",
+      name: "SystemToolsDatabase",
+      meta: {
+        title: "数据库表结构",
+        icon: "ri:database-2-line",
+        auths: ["database:read"]
+      }
+    });
+  }
+
   if (children.length > 0) {
     routes.push({
       path: "/go-admin",

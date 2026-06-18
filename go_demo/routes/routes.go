@@ -92,6 +92,9 @@ func Setup(db *sql.DB) *gin.Engine {
 				// AI 助手与系统健康
 				admin.POST("/ai/ask", middlewares.RequirePermission(authService, "ai:assistant"), adminCtrl.AskAssistant)
 				admin.GET("/health", middlewares.RequirePermission(authService, "health:read"), adminCtrl.SystemHealth)
+				admin.GET("/database/catalog", middlewares.RequirePermission(authService, "database:read"), adminCtrl.DatabaseCatalog)
+				admin.GET("/database/tables", middlewares.RequirePermission(authService, "database:read"), adminCtrl.ListDatabaseTables)
+				admin.GET("/database/tables/:table/columns", middlewares.RequirePermission(authService, "database:read"), adminCtrl.ListDatabaseColumns)
 			}
 		}
 	}

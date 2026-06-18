@@ -115,6 +115,31 @@ export type SystemHealth = {
   checked_at: string;
 };
 
+export type DatabaseCatalog = {
+  current_database: string;
+  databases: string[];
+  engines: string[];
+};
+
+export type DatabaseTable = {
+  name: string;
+  engine: string;
+  collation: string;
+  rows: number;
+  index_size: string;
+  comment: string;
+  created_at?: string;
+};
+
+export type DatabaseColumn = {
+  name: string;
+  type: string;
+  not_null: boolean;
+  default: string;
+  comment: string;
+  primary_key: boolean;
+};
+
 export type RolePayload = {
   name: string;
   description?: string;
@@ -299,5 +324,33 @@ export const getSystemHealth = () => {
   return http.request<{ health: SystemHealth }>(
     "get",
     "/api/v1/admin/health"
+  );
+};
+
+export const getDatabaseCatalog = () => {
+  return http.request<{ catalog: DatabaseCatalog }>(
+    "get",
+    "/api/v1/admin/database/catalog"
+  );
+};
+
+export const getDatabaseTables = (params?: {
+  database?: string;
+  table?: string;
+  engine?: string;
+  comment?: string;
+}) => {
+  return http.request<{ tables: DatabaseTable[] }>(
+    "get",
+    "/api/v1/admin/database/tables",
+    { params }
+  );
+};
+
+export const getDatabaseColumns = (table: string, database?: string) => {
+  return http.request<{ columns: DatabaseColumn[] }>(
+    "get",
+    `/api/v1/admin/database/tables/${encodeURIComponent(table)}/columns`,
+    { params: { database } }
   );
 };
