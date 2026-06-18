@@ -1,6 +1,6 @@
 {
-  "name": "pure-admin-thin",
-  "version": "6.2.0",
+  "name": "admins-admin",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -22,30 +22,28 @@
     "preinstall": "npx only-allow pnpm"
   },
   "keywords": [
-    "pure-admin-thin",
-    "vue-pure-admin",
+    "admins",
+    "admin-system",
     "element-plus",
     "tailwindcss",
-    "pure-admin",
     "typescript",
     "pinia",
     "vue3",
     "vite",
     "esm"
   ],
-  "homepage": "https://github.com/pure-admin/pure-admin-thin",
+  "homepage": "https://github.com/liveknife/admins",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/pure-admin/pure-admin-thin.git"
+    "url": "git+https://github.com/liveknife/admins.git"
   },
   "bugs": {
-    "url": "https://github.com/pure-admin/vue-pure-admin/issues"
+    "url": "https://github.com/liveknife/admins/issues"
   },
   "license": "MIT",
   "author": {
-    "name": "xiaoxian521",
-    "email": "pureadmin@163.com",
-    "url": "https://github.com/xiaoxian521"
+    "name": "liveknife",
+    "url": "https://github.com/liveknife"
   },
   "dependencies": {
     "@pureadmin/table": "^3.3.0",

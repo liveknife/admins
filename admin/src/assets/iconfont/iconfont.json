@@ -1,9 +1,9 @@
 {
   "id": "2208059",
-  "name": "pure-admin",
+  "name": "admins",
   "font_family": "iconfont",
   "css_prefix_text": "pure-iconfont-",
-  "description": "pure-admin-iconfont",
+  "description": "admins-iconfont",
   "glyphs": [
     {
       "icon_id": "20594647",

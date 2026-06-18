@@ -7,7 +7,7 @@ import boxen, { type Options as BoxenOptions } from "boxen";
 dayjs.extend(duration);
 
 const welcomeMessage = gradient(["cyan", "magenta"]).multiline(
-  `您好! 欢迎使用 pure-admin 开源项目\n我们为您精心准备了下面两个贴心的保姆级文档\nhttps://pure-admin.cn\nhttps://pure-admin-utils.netlify.app`
+  "欢迎使用 Admins 管理系统\n仓库地址：https://github.com/liveknife/admins"
 );
 
 const boxenOptions: BoxenOptions = {
@@ -42,9 +42,9 @@ export function viteBuildInfo(): Plugin {
             console.log(
               boxen(
                 gradient(["cyan", "magenta"]).multiline(
-                  `🎉 恭喜打包完成（总用时${dayjs
+                  `打包完成，总用时 ${dayjs
                     .duration(endTime.diff(startTime))
-                    .format("mm分ss秒")}，打包后的大小为${size}）`
+                    .format("mm分ss秒")}，产物大小 ${size}`
                 ),
                 boxenOptions
               )

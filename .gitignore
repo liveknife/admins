@@ -5,7 +5,7 @@ node_modules/
 .env
 .env.*
 !go_demo/.env.example
-
+.claude
 # Build output
 dist/
 dist-ssr/
@@ -14,6 +14,8 @@ report.html
 # Local cache
 .eslintcache
 tsconfig.tsbuildinfo
+.claude/
+admin/.git.pure-admin-backup/
 .codex-tmp/
 .tmp/
 .pnpm-store/

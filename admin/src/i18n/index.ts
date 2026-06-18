@@ -11,7 +11,7 @@ interface Messages {
   [key: string]: MessageValue;
 }
 
-const STORAGE_KEY = "pure-admin-locale";
+const STORAGE_KEY = "admins-locale";
 const defaultLocale: Locale = "zh-CN";
 
 const messages: Record<Locale, Messages> = {
@@ -120,7 +120,7 @@ const messages: Record<Locale, Messages> = {
       normal: "正常",
       password: "密码",
       passwordLength: "密码长度为 6-72 位",
-      passwordReadNotice: "该操作仅管理员权限可用，密码来自服务端加密存储。",
+      passwordReadNotice: "该操作仅管理员可用，密码来自服务端加密存储。",
       permissions: "权限",
       role: "角色",
       roleCreateFailed: "角色创建失败",
@@ -235,7 +235,7 @@ const messages: Record<Locale, Messages> = {
       functionMode: "函数方式判断权限",
       hasCode: "拥有 code：{code} 权限可见",
       pageDesc:
-        "模拟后台根据不同角色返回对应路由，观察左侧菜单变化（管理员角色可查看系统管理菜单、普通角色不可查看系统管理菜单）",
+        "模拟后台根据不同角色返回对应路由，观察左侧菜单变化。管理员可查看系统管理菜单，普通角色不可查看系统管理菜单。",
       superAdminTip: "*:*:* 代表拥有全部按钮级别权限"
     },
     tableBar: {
@@ -264,7 +264,7 @@ const messages: Record<Locale, Messages> = {
       contentExitFullscreen: "内容区退出全屏"
     },
     welcome: {
-      title: "Pure-Admin-Thin（国际化版本）"
+      title: "Admins 管理系统"
     }
   },
   "en-US": {
@@ -516,7 +516,7 @@ const messages: Record<Locale, Messages> = {
       contentExitFullscreen: "Exit content fullscreen"
     },
     welcome: {
-      title: "Pure-Admin-Thin (i18n enabled)"
+      title: "Admins Management System"
     }
   }
 };

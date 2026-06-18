@@ -1,13 +1,10 @@
-﻿import type { ECharts } from "echarts";
+import type { App } from "vue";
+import type { Effect } from "element-plus";
+import type { ECharts } from "echarts";
 import type { TableColumns } from "@pureadmin/table";
 
-/**
- * 鍏ㄥ眬绫诲瀷澹版槑锛屾棤闇€寮曞叆鐩存帴鍦?`.vue` 銆乣.ts` 銆乣.tsx` 鏂囦欢浣跨敤鍗冲彲鑾峰緱绫诲瀷鎻愮ず
- */
 declare global {
-  /**
-   * 骞冲彴鐨勫悕绉般€佺増鏈€佽繍琛屾墍闇€鐨刞node`鍜宍pnpm`鐗堟湰銆佷緷璧栥€佹渶鍚庢瀯寤烘椂闂寸殑绫诲瀷鎻愮ず
-   */
+  /** 平台名称、版本、运行环境和构建时间信息 */
   const __APP_INFO__: {
     pkg: {
       name: string;
@@ -22,11 +19,8 @@ declare global {
     lastBuildTime: string;
   };
 
-  /**
-   * Window 鐨勭被鍨嬫彁绀?
-   */
+  /** Window 扩展类型 */
   interface Window {
-    // Global vue app instance
     __APP__: App<Element>;
     webkitCancelAnimationFrame: (handle: number) => void;
     mozCancelAnimationFrame: (handle: number) => void;
@@ -38,18 +32,14 @@ declare global {
     msRequestAnimationFrame: (callback: FrameRequestCallback) => number;
   }
 
-  /**
-   * Document 鐨勭被鍨嬫彁绀?
-   */
+  /** Document 扩展类型 */
   interface Document {
     webkitFullscreenElement?: Element;
     mozFullScreenElement?: Element;
     msFullscreenElement?: Element;
   }
 
-  /**
-   * 鎵撳寘鍘嬬缉鏍煎紡鐨勭被鍨嬪０鏄?
-   */
+  /** 打包压缩格式 */
   type ViteCompression =
     | "none"
     | "gzip"
@@ -59,10 +49,7 @@ declare global {
     | "brotli-clear"
     | "both-clear";
 
-  /**
-   * 鍏ㄥ眬鑷畾涔夌幆澧冨彉閲忕殑绫诲瀷澹版槑
-   * @see {@link https://pure-admin.cn/pages/config/#%E5%85%B7%E4%BD%93%E9%85%8D%E7%BD%AE}
-   */
+  /** 全局自定义环境变量类型声明 */
   interface ViteEnv {
     VITE_PORT: number;
     VITE_PUBLIC_PATH: string;
@@ -74,15 +61,10 @@ declare global {
     VITE_COMPRESSION: ViteCompression;
   }
 
-  /**
-   *  缁ф壙 `@pureadmin/table` 鐨?`TableColumns` 锛屾柟渚垮叏灞€鐩存帴璋冪敤
-   */
+  /** 表格列类型快捷声明 */
   type TableColumnList = Array<TableColumns>;
 
-  /**
-   * 瀵瑰簲 `public/platform-config.json` 鏂囦欢鐨勭被鍨嬪０鏄?
-   * @see {@link https://pure-admin.cn/pages/config/#platform-config-json}
-   */
+  /** public/platform-config.json 对应的配置类型 */
   interface PlatformConfigs {
     Version?: string;
     Title?: string;
@@ -112,10 +94,7 @@ declare global {
     MenuSearchHistory?: number;
   }
 
-  /**
-   * 涓?`PlatformConfigs` 绫诲瀷涓嶅悓锛岃繖閲屾槸缂撳瓨鍒版祻瑙堝櫒鏈湴瀛樺偍鐨勭被鍨嬪０鏄?
-   * @see {@link https://pure-admin.cn/pages/config/#platform-config-json}
-   */
+  /** 缓存到浏览器本地存储的配置类型 */
   interface StorageConfigs {
     version?: string;
     title?: string;
@@ -141,9 +120,7 @@ declare global {
     username?: string;
   }
 
-  /**
-   * `responsive-storage` 鏈湴鍝嶅簲寮?`storage` 鐨勭被鍨嬪０鏄?
-   */
+  /** responsive-storage 本地响应式 storage 类型 */
   interface ResponsiveStorage {
     locale: {
       locale?: string;
@@ -170,20 +147,15 @@ declare global {
     tags?: Array<any>;
   }
 
-  /**
-   * 骞冲彴閲屾墍鏈夌粍浠跺疄渚嬮兘鑳借闂埌鐨勫叏灞€灞炴€у璞＄殑绫诲瀷澹版槑
-   */
+  /** 平台全局属性对象类型 */
   interface GlobalPropertiesApi {
     $echarts: ECharts;
     $storage: ResponsiveStorage;
     $config: PlatformConfigs;
   }
 
-  /**
-   * 鎵╁睍 `Element`
-   */
+  /** Element 扩展 */
   interface Element {
-    // v-ripple 浣滅敤浜?src/directives/ripple/index.ts 鏂囦欢
     _ripple?: {
       enabled?: boolean;
       centered?: boolean;
@@ -193,6 +165,3 @@ declare global {
     };
   }
 }
-
-
-
