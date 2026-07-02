@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"errors"
+	"log"
 	"os"
 	"strings"
 	"time"
@@ -23,6 +24,14 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 )
+
+// ──────────────────────────────────────────────
+// 全局邮件服务实例（在 main.go 中通过 InitMailer 初始化）
+// ──────────────────────────────────────────────
+var globalMailer *Mailer
+
+// InitMailer 初始化全局邮件服务。应在程序启动时调用一次。
+func InitMailer() { globalMailer = NewMailer() }
 
 // ──────────────────────────────────────────────
 // 错误定义（所有包共用）
@@ -42,7 +51,7 @@ var (
 	ErrInvalidRole             = errors.New("role name is required")
 	ErrCannotDeleteRole        = errors.New("system role cannot be deleted")
 	ErrEncryptedPasswordInvalid = errors.New("encrypted password is invalid")
-	ErrPasswordPolicy          = errors.New("password length must be between 6 and 72")
+	ErrPasswordPolicy          = errors.New("password does not meet complexity requirements: minimum 8 characters, at least one uppercase letter, one lowercase letter, one digit, and one special character")
 	ErrPasswordUnavailable     = utils.ErrPasswordUnavailable
 )
 
@@ -58,16 +67,62 @@ type AuthService struct {
 
 func NewAuthService(db *sql.DB) *AuthService {
 	secret := os.Getenv("JWT_SECRET")
-	if secret == "" { secret = "change-me-in-production" }
-	return &AuthService{db: db, jwtSecret: []byte(secret)}
+	if secret == "" {
+		log.Print("[WARN] JWT_SECRET is empty, using fallback (unsafe for production)")
+		secret = "change-me-in-production"
+	}
+	if secret == "change-me-in-production" {
+		log.Print("[FATAL] JWT_SECRET must be changed from the default value for security")
+		log.Fatal("[FATAL] Set a strong random secret via JWT_SECRET environment variable (min 32 chars recommended)")
+	}
+	svc := &AuthService{db: db, jwtSecret: []byte(secret)}
+	// 初始化时加载 RSA key（持久化到文件，重启不丢失）
+	svc.rsaKey = loadOrGenerateRSAKey()
+	return svc
+}
+
+// RSA_KEY_PATH 环境变量可自定义 key 文件路径，默认 ./rsa_key.pem
+const defaultRSAKeyPath = "rsa_key.pem"
+
+func rsaKeyPath() string {
+	if p := os.Getenv("RSA_KEY_PATH"); p != "" {
+		return p
+	}
+	return defaultRSAKeyPath
+}
+
+func loadOrGenerateRSAKey() *rsa.PrivateKey {
+	path := rsaKeyPath()
+	if data, err := os.ReadFile(path); err == nil {
+		block, _ := pem.Decode(data)
+		if block != nil {
+			if key, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
+				if priv, ok := key.(*rsa.PrivateKey); ok {
+					return priv
+				}
+			}
+		}
+	}
+	// 文件不存在或格式不对，生成新 key 并保存
+	k, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		panic(err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(k)
+	if err != nil {
+		panic(err)
+	}
+	data := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: der})
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		// 写文件失败不 panic，只警告（内存中 key 仍可用）
+		println("warning: failed to save RSA key to", path, err.Error())
+	}
+	return k
 }
 
 func (s *AuthService) getRSAKey() *rsa.PrivateKey {
-	if s.rsaKey != nil { return s.rsaKey }
-	k, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil { panic(err) }
-	s.rsaKey = k
-	return k
+	// NewAuthService 已预加载，这里仅做防御性返回
+	return s.rsaKey
 }
 
 // ──────────────────────────────────────────────
@@ -75,6 +130,7 @@ func (s *AuthService) getRSAKey() *rsa.PrivateKey {
 // ──────────────────────────────────────────────
 
 func (s *AuthService) Register(ctx context.Context, username, email, phone, password string) (*models.User, error) {
+	if err := validatePasswordComplexity(password); err != nil { return nil, err }
 	username = strings.TrimSpace(username)
 	email = strings.ToLower(strings.TrimSpace(email))
 	phone = config.NormalizePhone(phone)
@@ -174,20 +230,32 @@ func (s *AuthService) ValidateAccessToken(tokenString string) (*models.Claims, e
 // 密码重置
 // ──────────────────────────────────────────────
 
-func (s *AuthService) CreatePasswordResetToken(ctx context.Context, email string) (string, error) {
+func (s *AuthService) CreatePasswordResetToken(ctx context.Context, email string) error {
 	email = strings.ToLower(strings.TrimSpace(email))
 	var userID int64
 	err := database.QueryRowCtx(ctx, s.db, `SELECT id FROM users WHERE email=$1`, email).Scan(&userID)
-	if errors.Is(err, sql.ErrNoRows) { t, _ := randomToken(32); return t, nil }
-	if err != nil { return "", err }
-	token, err := randomToken(32); if err != nil { return "", err }
+	if errors.Is(err, sql.ErrNoRows) {
+		// 邮箱不存在时返回成功，防止枚举
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	token, err := randomToken(32)
+	if err != nil {
+		return err
+	}
 	database.ExecCtx(ctx, s.db,
 		`INSERT INTO password_reset_tokens(user_id,token,expires_at) VALUES($1,$2,$3)`,
 		userID, token, time.Now().Add(30*time.Minute))
-	return token, nil
+	// 发送密码重置邮件（未配置 SMTP 时自动降级为 dry-run）
+	resetLink := BuildResetLink(os.Getenv("FRONTEND_URL"), token)
+	globalMailer.SendPasswordResetEmail(email, resetLink)
+	return nil
 }
 
 func (s *AuthService) ResetPassword(ctx context.Context, token, newPassword string) error {
+	if err := validatePasswordComplexity(newPassword); err != nil { return err }
 	token = strings.TrimSpace(token)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil { return err }
@@ -234,17 +302,47 @@ func (s *AuthService) PasswordPublicKeyPEM() (string, error) {
 func (s *AuthService) DecryptClientPassword(encrypted string) (string, error) {
 	encrypted = strings.TrimSpace(encrypted)
 	if encrypted == "" { return "", ErrEncryptedPasswordInvalid }
+	var ciphertext []byte
 	ciphertext, err := base64.StdEncoding.DecodeString(encrypted)
-	if err != nil { ciphertext, _ = base64.RawStdEncoding.DecodeString(encrypted) }
+	if err != nil {
+		ciphertext, err = base64.RawStdEncoding.DecodeString(encrypted)
+	}
 	if err != nil { return "", ErrEncryptedPasswordInvalid }
 	plain, err := rsa.DecryptOAEP(sha256.New(), rand.Reader, s.getRSAKey(), ciphertext, nil)
 	if err != nil { return "", ErrEncryptedPasswordInvalid }
-	password := string(plain)
-	if len(password) < 6 || len(password) > 72 { return "", ErrPasswordPolicy }
-	return password, nil
+	return string(plain), nil
+}
+
+// validatePasswordComplexity 校验密码强度：
+// - 长度 8~72 字符
+// - 至少包含大写字母、小写字母、数字、特殊字符各一个
+func validatePasswordComplexity(password string) error {
+	if len(password) < 8 || len(password) > 72 {
+		return ErrPasswordPolicy
+	}
+	var (
+		hasUpper, hasLower, hasDigit, hasSpecial bool
+	)
+	for _, r := range password {
+		switch {
+		case r >= 'A' && r <= 'Z':
+			hasUpper = true
+		case r >= 'a' && r <= 'z':
+			hasLower = true
+		case r >= '0' && r <= '9':
+			hasDigit = true
+		case strings.ContainsRune("!@#$%^&*()_+-=[]{}|;':\",./<>?`~", r):
+			hasSpecial = true
+		}
+	}
+	if !(hasUpper && hasLower && hasDigit && hasSpecial) {
+		return ErrPasswordPolicy
+	}
+	return nil
 }
 
 func (s *AuthService) ResetUserPassword(ctx context.Context, userID int64, newPassword string) error {
+	if err := validatePasswordComplexity(newPassword); err != nil { return err }
 	if _, err := s.GetUserByID(ctx, userID); err != nil { return err }
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil { return err }
@@ -392,6 +490,7 @@ func (s *AuthService) UpdateProfile(ctx context.Context, userID int64, input Pro
 
 // ChangePassword 校验旧密码后写入新密码，同时吊销所有 refresh token。
 func (s *AuthService) ChangePassword(ctx context.Context, userID int64, oldPassword, newPassword string) error {
+	if err := validatePasswordComplexity(newPassword); err != nil { return err }
 	var storedHash string
 	err := database.QueryRowCtx(ctx, s.db, `SELECT password_hash FROM users WHERE id=$1 AND deleted_at IS NULL`, userID).Scan(&storedHash)
 	if errors.Is(err, sql.ErrNoRows) {

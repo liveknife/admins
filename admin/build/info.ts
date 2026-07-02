@@ -7,7 +7,7 @@ import boxen, { type Options as BoxenOptions } from "boxen";
 dayjs.extend(duration);
 
 const welcomeMessage = gradient(["cyan", "magenta"]).multiline(
-  "欢迎使用 Admins 管理系统\n仓库地址：https://github.com/liveknife/admins"
+  "欢迎使用 困困工作管理系统\n仓库地址：https://github.com/liveknife/admins"
 );
 
 const boxenOptions: BoxenOptions = {

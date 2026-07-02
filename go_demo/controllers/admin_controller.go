@@ -340,6 +340,10 @@ func (c *AdminController) ResetUserPassword(g *gin.Context) {
 		return
 	}
 	if err := c.authService.ResetUserPassword(g.Request.Context(), userID, pw); err != nil {
+		if errors.Is(err, services.ErrPasswordPolicy) {
+			g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reset password"})
 		return
 	}
@@ -377,6 +381,76 @@ func (c *AdminController) DeactivateUser(g *gin.Context) {
 	}
 	c.logAction(g, "\u6ce8\u9500\u7528\u6237", "\u7528\u6237\u7ba1\u7406", fmt.Sprintf("\u7528\u6237ID\uff1a%d", userID))
 	g.JSON(http.StatusOK, gin.H{"message": "user has been deactivated"})
+}
+
+func (c *AdminController) DeleteUser(g *gin.Context) {
+	userID, ok := parseIDParam(g, "id")
+	if !ok {
+		return
+	}
+	currentUserIDValue, exists := g.Get("user_id")
+	if !exists {
+		g.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	currentUserID, ok2 := currentUserIDValue.(int64)
+	if !ok2 {
+		g.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	err := c.authService.DeleteUser(g.Request.Context(), currentUserID, userID)
+	if errors.Is(err, services.ErrCannotDeleteSelf) {
+		g.JSON(http.StatusBadRequest, gin.H{"error": "cannot delete current user"})
+		return
+	}
+	if errors.Is(err, services.ErrUserNotFound) {
+		g.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete user"})
+		return
+	}
+	c.logAction(g, "\u5220\u9664\u7528\u6237", "\u7528\u6237\u7ba1\u7406", fmt.Sprintf("\u7528\u6237ID\uff1a%d", userID))
+	g.JSON(http.StatusOK, gin.H{"message": "user has been deleted permanently"})
+}
+
+// ReactivateUser 恢复已禁用用户（重置密码为默认密码 Admin123）
+func (c *AdminController) ReactivateUser(g *gin.Context) {
+	userID, ok := parseIDParam(g, "id")
+	if !ok {
+		return
+	}
+	currentUserIDValue, exists := g.Get("user_id")
+	if !exists {
+		g.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	currentUserID, ok2 := currentUserIDValue.(int64)
+	if !ok2 {
+		g.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	defaultPassword := "Admin123"
+	user, err := c.authService.ReactivateUser(g.Request.Context(), currentUserID, userID, defaultPassword)
+	if errors.Is(err, services.ErrCannotDeleteSelf) {
+		g.JSON(http.StatusBadRequest, gin.H{"error": "cannot reactivate current user"})
+		return
+	}
+	if errors.Is(err, services.ErrUserNotFound) {
+		g.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+	if err != nil && err.Error() == "user is not deactivated" {
+		g.JSON(http.StatusBadRequest, gin.H{"error": "user is not deactivated, reactivation not needed"})
+		return
+	}
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reactivate user"})
+		return
+	}
+	c.logAction(g, "\u6062\u590d\u7528\u6237", "\u7528\u6237\u7ba1\u7406", fmt.Sprintf("\u7528\u6237\uff1a%s\uff0c\u5bc6\u7801\u5df2\u91cd\u7f6e\u4e3A\u9ed8\u8ba4\u5bc6\u7801", user.Username))
+	g.JSON(http.StatusOK, gin.H{"message": "user has been reactivated with default password", "user": user})
 }
 
 func (c *AdminController) CreateUser(g *gin.Context) {

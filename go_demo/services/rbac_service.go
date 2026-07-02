@@ -260,7 +260,7 @@ func (s *AuthService) SetUserRoles(ctx context.Context, userID int64, roleNames 
 	return s.GetUserByID(ctx, userID)
 }
 
-// DeactivateUser 停用用户
+// DeactivateUser 停用用户（软删除）
 func (s *AuthService) DeactivateUser(_ context.Context, currentUserID, userID int64) error {
 	if currentUserID == userID {
 		return ErrCannotDeleteSelf
@@ -273,6 +273,58 @@ func (s *AuthService) DeactivateUser(_ context.Context, currentUserID, userID in
 	}
 	database.Exec(s.db, `UPDATE refresh_tokens SET revoked_at=`+nowFn+` WHERE user_id=$1 AND revoked_at IS NULL`, userID)
 	return nil
+}
+
+// DeleteUser 永久删除用户（硬删除，不可恢复，级联清除关联数据）
+func (s *AuthService) DeleteUser(_ context.Context, currentUserID, userID int64) error {
+	if currentUserID == userID {
+		return ErrCannotDeleteSelf
+	}
+	tx, err := s.db.BeginTx(context.Background(), nil)
+	if err != nil { return err }
+	defer tx.Rollback()
+	// 级联删除：refresh_tokens → user_roles → password_reset_tokens → users
+	database.ExecTxCtx(context.Background(), tx, `DELETE FROM refresh_tokens WHERE user_id=$1`, userID)
+	database.ExecTxCtx(context.Background(), tx, `DELETE FROM user_roles WHERE user_id=$1`, userID)
+	database.ExecTxCtx(context.Background(), tx, `DELETE FROM password_reset_tokens WHERE user_id=$1`, userID)
+	result, err := database.ExecTxCtx(context.Background(), tx, `DELETE FROM users WHERE id=$1`, userID)
+	if err != nil { return err }
+	affected, _ := result.RowsAffected()
+	if affected == 0 { return ErrUserNotFound }
+	return tx.Commit()
+}
+
+// ReactivateUser 恢复已禁用用户（清除 deleted_at 并重置密码为默认密码）
+func (s *AuthService) ReactivateUser(_ context.Context, currentUserID, userID int64, defaultPassword string) (*models.User, error) {
+	if currentUserID == userID {
+		return nil, ErrCannotDeleteSelf
+	}
+	// 检查用户是否存在且已被禁用
+	var exists bool
+	var deletedAt sql.NullTime
+	err := database.QueryRow(s.db, `SELECT EXISTS(SELECT 1 FROM users WHERE id=$1), deleted_at FROM users WHERE id=$1`, userID).Scan(&exists, &deletedAt)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, ErrUserNotFound
+	}
+	if !deletedAt.Valid {
+		return nil, errors.New("user is not deactivated")
+	}
+
+	nowFn := database.Now()
+	hash, _ := bcrypt.GenerateFromPassword([]byte(defaultPassword), bcrypt.DefaultCost)
+	secret, _ := utils.EncryptPassword(defaultPassword)
+
+	// 清除 deleted_at 并重置密码
+	_, err = database.Exec(s.db,
+		`UPDATE users SET deleted_at=NULL, password_hash=$1, password_secret=$2, updated_at=`+nowFn+` WHERE id=$3`,
+		string(hash), secret, userID)
+	if err != nil {
+		return nil, err
+	}
+	return s.GetUserByID(context.Background(), userID)
 }
 
 // CreateUser 管理员创建用户

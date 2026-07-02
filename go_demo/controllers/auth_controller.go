@@ -80,7 +80,7 @@ type ChangePasswordRequest struct {
 func (c *AuthController) PasswordPublicKey(g *gin.Context) {
 	pk, err := c.authService.PasswordPublicKeyPEM()
 	if err != nil {
-		respondError(g, http.StatusInternalServerError, "failed to get password public key")
+		respondError(g, http.StatusInternalServerError, "internal error")
 		return
 	}
 	g.JSON(http.StatusOK, gin.H{"algorithm": "RSA-OAEP-256", "public_key": pk})
@@ -88,12 +88,12 @@ func (c *AuthController) PasswordPublicKey(g *gin.Context) {
 
 func (c *AuthController) Captcha(g *gin.Context) {
 	if c.captcha == nil {
-		respondError(g, http.StatusServiceUnavailable, "captcha service unavailable")
+		respondError(g, http.StatusServiceUnavailable, "service unavailable")
 		return
 	}
 	ch, err := c.captcha.Generate(g.Request.Context())
 	if err != nil {
-		respondError(g, http.StatusInternalServerError, "failed to generate captcha")
+		respondError(g, http.StatusInternalServerError, "internal error")
 		return
 	}
 	g.JSON(http.StatusOK, ch)
@@ -119,7 +119,7 @@ func (c *AuthController) Register(g *gin.Context) {
 		return
 	}
 	if err != nil {
-		respondError(g, http.StatusInternalServerError, "failed to register user")
+		respondError(g, http.StatusInternalServerError, "internal error")
 		return
 	}
 	g.JSON(http.StatusCreated, gin.H{"user": user})
@@ -157,7 +157,7 @@ func (c *AuthController) Login(g *gin.Context) {
 		return
 	}
 	if err != nil {
-		respondError(g, http.StatusInternalServerError, "failed to login")
+		respondError(g, http.StatusInternalServerError, "internal error")
 		return
 	}
 	g.JSON(http.StatusOK, gin.H{"user": user, "tokens": tokens})
@@ -175,7 +175,7 @@ func (c *AuthController) RefreshToken(g *gin.Context) {
 		return
 	}
 	if err != nil {
-		respondError(g, http.StatusInternalServerError, "failed to refresh token")
+		respondError(g, http.StatusInternalServerError, "internal error")
 		return
 	}
 	g.JSON(http.StatusOK, gin.H{"user": user, "tokens": tokens})
@@ -190,12 +190,12 @@ func (c *AuthController) ForgotPassword(g *gin.Context) {
 	if err := c.verifyCaptcha(g, req.CaptchaID, req.Captcha); err != nil {
 		return
 	}
-	token, err := c.authService.CreatePasswordResetToken(g.Request.Context(), req.Email)
-	if err != nil {
-		respondError(g, http.StatusInternalServerError, "failed to create password reset token")
+	if err := c.authService.CreatePasswordResetToken(g.Request.Context(), req.Email); err != nil {
+		respondError(g, http.StatusInternalServerError, "internal error")
 		return
 	}
-	g.JSON(http.StatusOK, gin.H{"message": "if the email exists, a password reset token has been created", "reset_token": token})
+	// 统一响应，避免邮箱枚举攻击：无论邮箱是否存在都返回相同消息
+	g.JSON(http.StatusOK, gin.H{"message": "if the email exists, a password reset link has been sent"})
 }
 
 func (c *AuthController) ResetPassword(g *gin.Context) {
@@ -218,8 +218,12 @@ func (c *AuthController) ResetPassword(g *gin.Context) {
 		respondError(g, http.StatusBadRequest, "reset token is invalid or expired")
 		return
 	}
+	if errors.Is(err, services.ErrPasswordPolicy) {
+		respondError(g, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err != nil {
-		respondError(g, http.StatusInternalServerError, "failed to reset password")
+		respondError(g, http.StatusInternalServerError, "internal error")
 		return
 	}
 	g.JSON(http.StatusOK, gin.H{"message": "password has been reset"})
@@ -236,7 +240,7 @@ func (c *AuthController) Me(g *gin.Context) {
 	}
 	user, err := c.authService.GetUserByID(g.Request.Context(), userID)
 	if err != nil {
-		respondError(g, http.StatusInternalServerError, "failed to get user")
+		respondError(g, http.StatusInternalServerError, "internal error")
 		return
 	}
 	g.JSON(http.StatusOK, gin.H{"user": user})
@@ -263,7 +267,7 @@ func (c *AuthController) UpdateProfile(g *gin.Context) {
 		return
 	}
 	if err != nil {
-		respondError(g, http.StatusInternalServerError, "failed to update profile")
+		respondError(g, http.StatusInternalServerError, "internal error")
 		return
 	}
 	g.JSON(http.StatusOK, gin.H{"user": user})
@@ -281,12 +285,12 @@ func (c *AuthController) ChangeMyPassword(g *gin.Context) {
 	}
 	oldPw, err := c.authService.DecryptClientPassword(req.OldPasswordEncrypted)
 	if err != nil {
-		respondError(g, http.StatusBadRequest, "old password: "+err.Error())
+		respondError(g, http.StatusBadRequest, err.Error())
 		return
 	}
 	newPw, err := c.authService.DecryptClientPassword(req.NewPasswordEncrypted)
 	if err != nil {
-		respondError(g, http.StatusBadRequest, "new password: "+err.Error())
+		respondError(g, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := c.authService.ChangePassword(g.Request.Context(), userID, oldPw, newPw); err != nil {
@@ -294,7 +298,11 @@ func (c *AuthController) ChangeMyPassword(g *gin.Context) {
 			respondError(g, http.StatusUnauthorized, "old password is incorrect")
 			return
 		}
-		respondError(g, http.StatusInternalServerError, "failed to change password")
+		if errors.Is(err, services.ErrPasswordPolicy) {
+			respondError(g, http.StatusBadRequest, err.Error())
+			return
+		}
+		respondError(g, http.StatusInternalServerError, "internal error")
 		return
 	}
 	g.JSON(http.StatusOK, gin.H{"message": "password has been updated"})
@@ -325,17 +333,17 @@ func (c *AuthController) UploadAvatar(g *gin.Context) {
 	name := fmt.Sprintf("%d-%d%s", userID, time.Now().UnixNano(), ext)
 	dir := filepath.Join("uploads", "avatar", time.Now().Format("200601"))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		respondError(g, http.StatusInternalServerError, "failed to create upload dir")
+		respondError(g, http.StatusInternalServerError, "internal error")
 		return
 	}
 	path := filepath.Join(dir, name)
 	if err := g.SaveUploadedFile(fh, path); err != nil {
-		respondError(g, http.StatusInternalServerError, "failed to save file")
+		respondError(g, http.StatusInternalServerError, "internal error")
 		return
 	}
 	url := "/" + filepath.ToSlash(path)
 	if err := c.authService.SetAvatar(g.Request.Context(), userID, url); err != nil {
-		respondError(g, http.StatusInternalServerError, "failed to save avatar")
+		respondError(g, http.StatusInternalServerError, "internal error")
 		return
 	}
 	g.JSON(http.StatusOK, gin.H{"avatar_url": url})

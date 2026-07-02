@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"go-demo/config"
 	"go-demo/controllers"
 	"go-demo/docs"
 	"go-demo/middlewares"
@@ -17,6 +18,7 @@ import (
 // Setup 初始化所有路由并返回 Gin Engine
 func Setup(db *sql.DB) *gin.Engine {
 	r := gin.Default()
+	r.Use(middlewares.CORS())
 	r.Static("/uploads", "./uploads")
 
 	authService := services.NewAuthService(db)
@@ -35,8 +37,9 @@ func Setup(db *sql.DB) *gin.Engine {
 	specs := buildRouteSpecs(authService, authCtrl, adminCtrl, chatCtrl)
 	mount(r, specs, authService)
 
-	// Swagger UI: /swagger/index.html
-	docs.Register(r, "/swagger", docs.Info{
+	// Swagger UI: /swagger/index.html (仅开发环境)
+	if !config.IsProduction() {
+		docs.Register(r, "/swagger", docs.Info{
 		Title:       "Admins Platform API",
 		Version:     "1.0.0",
 		Description: "后台管理平台 API 文档。所有以 `/api/v1/admin/*` 开头的路由需要 Bearer JWT，并按权限码授权。",
@@ -46,7 +49,8 @@ func Setup(db *sql.DB) *gin.Engine {
 			models.SiteAnnouncement{}, models.SiteBanner{}, models.SiteTimelineEvent{},
 			models.Notification{}, models.OperationLog{},
 		},
-	}, docRoutes(specs))
+		}, docRoutes(specs))
+	}
 
 	return r
 }
@@ -126,6 +130,7 @@ func buildRouteSpecs(
 	messageLimit := middlewares.RateLimit("site-message", 6, 10*time.Minute, nil)
 	avatarLimit := middlewares.RateLimit("avatar-upload", 10, 10*time.Minute, nil)
 	passwordLimit := middlewares.RateLimit("change-pw", 6, 10*time.Minute, nil)
+	refreshLimit := middlewares.RateLimit("refresh-token", 20, time.Minute, nil)
 
 	specs := []routeSpec{
 		// ── 公开：健康、基础 ──
@@ -182,7 +187,7 @@ func buildRouteSpecs(
 				{Status: "429", Description: "登录尝试过于频繁", Schema: respErr.Schema},
 			},
 		}},
-		{Method: "POST", Path: "/api/v1/refresh-token", Handler: authCtrl.RefreshToken, Doc: docs.Op{
+		{Method: "POST", Path: "/api/v1/refresh-token", Handler: authCtrl.RefreshToken, Middleware: []gin.HandlerFunc{refreshLimit}, Doc: docs.Op{
 			Summary: "刷新访问令牌", Tags: []string{"Auth"},
 			Body: docs.Body{Required: true, Schema: controllers.RefreshTokenRequest{}},
 		}},
@@ -285,7 +290,9 @@ func buildRouteSpecs(
 		{Method: "PUT", Path: "/api/v1/admin/users/:id/roles", Handler: adminCtrl.SetUserRoles, Auth: true, Permission: "users:write", Doc: docs.Op{Summary: "分配用户角色", Tags: []string{"Admin · Users"}, Body: docs.Body{Required: true, Schema: controllers.SetUserRolesRequest{}}}},
 		{Method: "GET", Path: "/api/v1/admin/users/:id/password", Handler: adminCtrl.GetUserPassword, Auth: true, Permission: "users:password:read", Doc: docs.Op{Summary: "获取用户明文密码（密码保险箱）", Tags: []string{"Admin · Users"}}},
 		{Method: "PUT", Path: "/api/v1/admin/users/:id/password", Handler: adminCtrl.ResetUserPassword, Auth: true, Permission: "users:write", Doc: docs.Op{Summary: "重置用户密码", Tags: []string{"Admin · Users"}, Body: docs.Body{Required: true, Schema: controllers.ResetUserPasswordRequest{}}}},
-		{Method: "DELETE", Path: "/api/v1/admin/users/:id", Handler: adminCtrl.DeactivateUser, Auth: true, Permission: "users:write", Doc: docs.Op{Summary: "停用用户", Tags: []string{"Admin · Users"}}},
+		{Method: "DELETE", Path: "/api/v1/admin/users/:id", Handler: adminCtrl.DeactivateUser, Auth: true, Permission: "users:write", Doc: docs.Op{Summary: "\u505c\u7528\u7528\u6237\u08f08\u8f6f\u5220\u9664\uff09", Tags: []string{"Admin \u00b7 Users"}}},
+		{Method: "PUT", Path: "/api/v1/admin/users/:id/reactivate", Handler: adminCtrl.ReactivateUser, Auth: true, Permission: "users:write", Doc: docs.Op{Summary: "\u6062\u590d\u5df2\u7981\u7528\u7528\u6237\u08f09\u91cd\u7f6e\u5bc6\u7801\u4e3a Admin123\uff09", Tags: []string{"Admin \u00b7 Users"}}},
+		{Method: "DELETE", Path: "/api/v1/admin/users/:id/permanent", Handler: adminCtrl.DeleteUser, Auth: true, Permission: "users:write", Doc: docs.Op{Summary: "\u6c38\u4e45\u5220\u9664\u7528\u6237\u08f09\u786c\u5220\u9664\uff0c\u4e0d\u53ef\u6062\u590d\uff09", Tags: []string{"Admin \u00b7 Users"}}},
 
 		// ── Admin：角色 & 权限 ──
 		{Method: "GET", Path: "/api/v1/admin/roles", Handler: adminCtrl.ListRoles, Auth: true, Permission: "roles:read", Doc: docs.Op{Summary: "角色列表", Tags: []string{"Admin · Roles"}, Params: pageQuery}},

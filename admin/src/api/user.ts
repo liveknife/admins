@@ -141,7 +141,7 @@ export const forgotPasswordApi = (data?: {
   captcha?: string;
   captcha_id?: string;
 }) => {
-  return http.request<{ message: string; reset_token: string }>(
+  return http.request<{ message: string }>(
     "post",
     "/api/v1/forgot-password",
     { data }

@@ -6,9 +6,11 @@ import { useI18n } from "@/i18n";
 import {
   createAdminUser,
   deactivateAdminUser,
+  deleteAdminUser,
   getAdminRoles,
   getAdminUserPassword,
   getAdminUsers,
+  reactivateAdminUser,
   resetAdminUserPassword,
   setAdminUserRoles,
   updateAdminUser,
@@ -82,7 +84,12 @@ const userFormRules = computed<FormRules>(() => {
   if (!isEditMode.value) {
     rules.password = [
       { required: true, message: t("admin.passwordRequired"), trigger: "blur" },
-      { min: 6, max: 72, message: t("admin.passwordLength"), trigger: "blur" }
+      { min: 8, max: 72, message: t("admin.passwordLength"), trigger: "blur" },
+      {
+        pattern: /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{}|;':",./<>?`~]).{8,72}$/,
+        message: t("admin.passwordComplexity"),
+        trigger: "blur"
+      }
     ];
   }
   return rules;
@@ -283,6 +290,41 @@ const deactivateUser = async (row: GoUser) => {
   }
 };
 
+// ── 永久删除用户 ──
+const deleteUser = async (row: GoUser) => {
+  try {
+    await ElMessageBox.confirm(
+      t("admin.userDeleteConfirm", { name: row.username }),
+      t("common.delete"),
+      { type: "error", confirmButtonText: t("admin.deleteConfirm"), cancelButtonText: t("common.cancel") }
+    );
+    await deleteAdminUser(row.id);
+    message(t("admin.userDeleted"), { type: "success" });
+    if (users.value.length === 1 && pagination.page > 1) {
+      pagination.page -= 1;
+    }
+    await loadData();
+  } catch (error) {
+    if (error !== "cancel") message(t("admin.userDeleteFailed"), { type: "error" });
+  }
+};
+
+// ── 恢复已禁用用户 ──
+const reactivateUser = async (row: GoUser) => {
+  try {
+    await ElMessageBox.confirm(
+      t("admin.userReactivateConfirm", { name: row.username }),
+      t("admin.reactivate"),
+      { type: "info", confirmButtonText: t("admin.reactivateConfirm"), cancelButtonText: t("common.cancel") }
+    );
+    const res = await reactivateAdminUser(row.id);
+    message(t("admin.userReactivated", { password: "Admin123" }), { type: "success" });
+    await loadData();
+  } catch (error) {
+    if (error !== "cancel") message(t("admin.userReactivateFailed"), { type: "error" });
+  }
+};
+
 const handlePageChange = () => {
   loadData();
 };
@@ -423,7 +465,7 @@ onMounted(loadData);
         <el-table-column
           v-if="canWrite || canReadPassword"
           :label="t('common.operation')"
-          width="330"
+          width="380"
           fixed="right"
         >
           <template #default="{ row }">
@@ -472,6 +514,22 @@ onMounted(loadData);
                 @click="deactivateUser(row)"
               >
                 {{ t("admin.deactivate") }}
+              </el-button>
+              <el-button
+                v-if="canWrite && isDeactivated(row)"
+                type="success"
+                link
+                @click="reactivateUser(row)"
+              >
+                {{ t("admin.reactivate") }}
+              </el-button>
+              <el-button
+                v-if="canWrite"
+                type="danger"
+                link
+                @click="deleteUser(row)"
+              >
+                {{ t("common.delete") }}
               </el-button>
             </div>
           </template>

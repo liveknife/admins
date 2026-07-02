@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, reactive, ref } from "vue";
 import type { FormInstance, FormRules } from "element-plus";
 import { ElMessageBox, type ElTree } from "element-plus";
 import { message } from "@/utils/message";
+import { useI18n } from "@/i18n";
 import {
   createAdminRole,
   deleteAdminRole,
@@ -21,6 +22,7 @@ import RePagination from "@/components/RePagination";
 
 defineOptions({ name: "GoAdminRoles" });
 
+const { t } = useI18n();
 const loading = ref(false);
 const saving = ref(false);
 const dialogVisible = ref(false);
@@ -43,8 +45,8 @@ const form = reactive({
 
 const rules = computed<FormRules>(() => ({
   name: [
-    { required: true, message: "请输入角色名称", trigger: "blur" },
-    { min: 2, max: 50, message: "角色名称长度为 2-50 个字符", trigger: "blur" }
+    { required: true, message: t("admin.roleNameRequired"), trigger: "blur" },
+    { min: 2, max: 50, message: t("admin.roleNameLength"), trigger: "blur" }
   ]
 }));
 
@@ -78,7 +80,7 @@ const loadData = async () => {
       await selectRole(roles.value[0]);
     }
   } catch {
-    message("角色权限加载失败", { type: "error" });
+    message(t("admin.roleLoadFailed"), { type: "error" });
   } finally {
     loading.value = false;
   }
@@ -135,16 +137,16 @@ const submit = async () => {
   try {
     if (isEditing.value) {
       await updateAdminRole(form.id, payload);
-      message("角色已更新", { type: "success" });
+      message(t("admin.roleUpdated"), { type: "success" });
     } else {
       await createAdminRole(payload);
-      message("角色已创建", { type: "success" });
+      message(t("admin.roleCreated"), { type: "success" });
       pagination.page = 1;
     }
     dialogVisible.value = false;
     await loadData();
   } catch {
-    message(isEditing.value ? "角色更新失败" : "角色创建失败", { type: "error" });
+    message(isEditing.value ? t("admin.roleUpdateFailed") : t("admin.roleCreateFailed"), { type: "error" });
   } finally {
     saving.value = false;
   }
@@ -152,13 +154,21 @@ const submit = async () => {
 
 const removeRole = async (row: GoRole) => {
   try {
-    await ElMessageBox.confirm(`确认删除角色 ${row.name}？`, "提示", { type: "warning" });
+    await ElMessageBox.confirm(
+      t("admin.roleDeleteConfirm", { name: row.name }),
+      t("common.tip"),
+      {
+        type: "warning",
+        confirmButtonText: t("common.confirm"),
+        cancelButtonText: t("common.cancel")
+      }
+    );
     await deleteAdminRole(row.id);
-    message("角色已删除", { type: "success" });
+    message(t("admin.roleDeleted"), { type: "success" });
     if (roles.value.length === 1 && pagination.page > 1) pagination.page -= 1;
     await loadData();
   } catch (error) {
-    if (error !== "cancel") message("角色删除失败", { type: "error" });
+    if (error !== "cancel") message(t("admin.roleDeleteFailed"), { type: "error" });
   }
 };
 
@@ -169,7 +179,7 @@ const selectRole = async (row: GoRole) => {
     preview.value = res.preview;
   } catch {
     preview.value = undefined;
-    message("角色预览加载失败", { type: "error" });
+    message(t("admin.roleLoadFailed"), { type: "error" });
   }
 };
 
@@ -177,24 +187,28 @@ onMounted(loadData);
 </script>
 
 <template>
-  <div class="role-console">
-    <section class="role-hero">
-      <div>
-        <p class="eyebrow">Access control console</p>
-        <h2>权限可视化配置</h2>
-        <p>用树形结构维护菜单、按钮和系统能力，实时预览角色能看到的后台入口。</p>
+  <div class="page-container">
+    <!-- 头部工具栏 -->
+    <div class="page-header">
+      <div class="page-header-left">
+        <h2 class="page-title">{{ t("routes.roles") }}</h2>
+        <span class="page-badge">/api/v1/admin/roles</span>
       </div>
-      <div class="hero-actions">
-        <el-button :loading="loading" @click="loadData">刷新</el-button>
-        <el-button v-if="canWrite" type="primary" @click="openCreate">新建角色</el-button>
-      </div>
-    </section>
+      <el-space>
+        <el-button :loading="loading" @click="loadData">
+          {{ t("common.refresh") }}
+        </el-button>
+        <el-button v-if="canWrite" type="primary" @click="openCreate">
+          + {{ t("admin.createRole") }}
+        </el-button>
+      </el-space>
+    </div>
 
     <section class="role-layout">
       <div class="role-panel role-list-panel">
         <div class="panel-head">
-          <span>角色列表</span>
-          <small>{{ pagination.total }} 个角色</small>
+          <span>{{ t("routes.roles") }}</span>
+          <small>{{ pagination.total }} {{ t("admin.role") }}</small>
         </div>
         <el-table
           v-loading="loading"
@@ -204,30 +218,30 @@ onMounted(loadData);
           class="role-table"
           @row-click="selectRole"
         >
-          <el-table-column prop="name" label="角色" min-width="150">
+          <el-table-column prop="name" :label="t('admin.role')" min-width="150">
             <template #default="{ row }">
               <div class="role-name-cell">
                 <span class="role-mark">{{ row.name?.slice(0, 1)?.toUpperCase() }}</span>
                 <div>
                   <div class="role-name">{{ row.name }}</div>
-                  <div class="role-desc">{{ row.description || "暂无描述" }}</div>
+                  <div class="role-desc">{{ row.description || t("admin.noDescription") }}</div>
                 </div>
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="权限" width="86" align="center">
+          <el-table-column :label="t('admin.permissions')" width="86" align="center">
             <template #default="{ row }">{{ row.permissions?.length ?? 0 }}</template>
           </el-table-column>
-          <el-table-column v-if="canWrite" label="操作" width="130" fixed="right">
+          <el-table-column v-if="canWrite" :label="t('common.operation')" width="130" fixed="right">
             <template #default="{ row }">
-              <el-button link type="primary" @click.stop="openEdit(row)">编辑</el-button>
+              <el-button link type="primary" @click.stop="openEdit(row)">{{ t("common.edit") }}</el-button>
               <el-button
                 link
                 type="danger"
                 :disabled="['admin', 'user'].includes(row.name)"
                 @click.stop="removeRole(row)"
               >
-                删除
+                {{ t("common.delete") }}
               </el-button>
             </template>
           </el-table-column>
@@ -243,58 +257,60 @@ onMounted(loadData);
 
       <div class="role-panel preview-panel">
         <div class="panel-head">
-          <span>角色权限预览</span>
-          <small>{{ selectedRole?.name || "未选择" }}</small>
+          <span>{{ t("admin.rolePreviewTitle") }}</span>
+          <small>{{ selectedRole?.name || t("admin.notSelected") }}</small>
         </div>
         <div v-if="preview" class="preview-grid">
           <div class="preview-card">
-            <div class="preview-title">可见菜单</div>
+            <div class="preview-title">{{ t("admin.visibleMenus") }}</div>
             <div class="preview-list">
               <el-tag v-for="item in preview.menus" :key="item.id" effect="plain">
                 {{ item.label }}
               </el-tag>
-              <span v-if="!preview.menus.length" class="empty-text">暂无菜单权限</span>
+              <span v-if="!preview.menus.length" class="empty-text">{{ t("admin.noMenuPermissions") }}</span>
             </div>
           </div>
           <div class="preview-card">
-            <div class="preview-title">按钮权限</div>
+            <div class="preview-title">{{ t("admin.buttonPermissions") }}</div>
             <div class="preview-list">
               <el-tag v-for="item in preview.buttons" :key="item.id" type="warning" effect="plain">
                 {{ item.label }}
               </el-tag>
-              <span v-if="!preview.buttons.length" class="empty-text">暂无按钮权限</span>
+              <span v-if="!preview.buttons.length" class="empty-text">{{ t("admin.noButtonPermissions") }}</span>
             </div>
           </div>
           <div class="preview-card full">
-            <div class="preview-title">权限码</div>
+            <div class="preview-title">{{ t("admin.permissionCodes") }}</div>
             <div class="code-list">
               <code v-for="code in preview.permissions" :key="code">{{ code }}</code>
             </div>
           </div>
         </div>
-        <el-empty v-else description="选择左侧角色查看预览" />
+        <el-empty v-else :description="t('admin.selectRolePreview')" />
       </div>
     </section>
 
     <el-dialog
       v-model="dialogVisible"
-      :title="isEditing ? '编辑角色权限' : '新建角色'"
+      :title="isEditing ? t('admin.editRole') : t('admin.createRole')"
       width="760px"
       class="role-dialog"
       @closed="resetForm"
     >
       <el-form ref="formRef" :model="form" :rules="rules" label-width="86px">
-        <el-form-item label="角色名称" prop="name">
-          <el-input v-model="form.name" placeholder="请输入角色名称" />
+        <el-form-item :label="t('admin.roleName')" prop="name">
+          <el-input v-model="form.name" :placeholder="t('admin.roleNameRequired')" />
         </el-form-item>
-        <el-form-item label="描述">
-          <el-input v-model="form.description" type="textarea" :rows="3" placeholder="说明这个角色适合谁使用" />
+        <el-form-item :label="t('common.description')">
+          <el-input v-model="form.description" type="textarea" :rows="3" :placeholder="t('admin.descriptionPlaceholder')" />
         </el-form-item>
-        <el-form-item label="权限配置">
+        <el-form-item :label="t('admin.permissionConfig')">
           <div class="tree-shell">
             <div class="tree-toolbar">
-              <span>已选择 {{ permissionCount }} 项权限</span>
-              <el-button link type="primary" @click="permissionTreeRef?.setCheckedKeys([])">清空</el-button>
+              <span>{{ t("admin.selectedCount", { count: permissionCount }) }}</span>
+              <el-button link type="primary" @click="permissionTreeRef?.setCheckedKeys([])">
+                {{ t("admin.clear") }}
+              </el-button>
             </div>
             <el-tree
               ref="permissionTreeRef"
@@ -318,59 +334,48 @@ onMounted(loadData);
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submit">保存权限</el-button>
+        <el-button @click="dialogVisible = false">{{ t("common.cancel") }}</el-button>
+        <el-button type="primary" :loading="saving" @click="submit">{{ t("common.save") }}</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
-<style scoped lang="scss">
-.role-console {
-  padding: 24px;
-  display: grid;
-  gap: 16px;
+<style lang="scss" scoped>
+.page-container {
+  padding: 24px 28px;
 }
 
-.role-hero,
-.role-panel,
-.preview-card,
-.tree-shell {
-  background: var(--app-surface);
-  border: 1px solid var(--app-border);
-  border-radius: 8px;
-}
-
-.role-hero {
+.page-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 22px 24px;
+  margin-bottom: 20px;
 }
 
-.eyebrow {
-  margin: 0 0 6px;
-  color: var(--app-primary);
-  font-family: "Menlo", "Consolas", monospace;
-  font-size: 12px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-.role-hero h2 {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 750;
-}
-
-.role-hero p:last-child {
-  margin: 8px 0 0;
-  color: var(--app-text-secondary);
-}
-
-.hero-actions {
+.page-header-left {
   display: flex;
+  align-items: center;
   gap: 10px;
+}
+
+.page-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--app-text);
+  margin: 0;
+}
+
+.page-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  background: var(--app-bg-soft);
+  color: var(--app-violet);
+  font-size: 11.5px;
+  font-weight: 500;
+  border-radius: 4px;
+  border: 1px solid #e0e7ff;
+  font-family: "Menlo", "Monaco", monospace;
 }
 
 .role-layout {
@@ -379,8 +384,18 @@ onMounted(loadData);
   gap: 16px;
 }
 
+@media (max-width: 1100px) {
+  .role-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
 .role-panel {
+  background: var(--app-surface);
+  border-radius: 8px;
+  border: 1px solid var(--app-border-soft);
   overflow: hidden;
+  box-shadow: 0 10px 28px rgb(33 49 77 / 8%);
 }
 
 .panel-head {
@@ -389,6 +404,7 @@ onMounted(loadData);
   justify-content: space-between;
   padding: 16px 18px;
   font-weight: 700;
+  color: var(--app-text);
   border-bottom: 1px solid var(--app-border-soft);
 }
 
@@ -399,6 +415,24 @@ onMounted(loadData);
 
 .role-table {
   width: 100%;
+
+  --el-table-header-bg-color: var(--app-surface-muted);
+  --el-table-header-text-color: var(--app-text-secondary);
+  --el-table-row-hover-bg-color: var(--app-surface-soft);
+
+  :deep(.el-table__header th) {
+    height: 46px;
+    font-weight: 700;
+    background: var(--app-surface-muted) !important;
+  }
+
+  :deep(.el-table__row) {
+    height: 58px;
+  }
+
+  :deep(.el-table__cell) {
+    border-color: var(--app-border-soft);
+  }
 }
 
 .role-name-cell {
@@ -414,7 +448,8 @@ onMounted(loadData);
   height: 32px;
   color: var(--app-primary);
   font-weight: 800;
-  background: var(--app-bg-soft);
+  background: linear-gradient(135deg, var(--app-bg-soft) 0%, #e8fff7 100%);
+  border: 1px solid var(--app-border);
   border-radius: 8px;
 }
 
@@ -441,6 +476,9 @@ onMounted(loadData);
 
 .preview-card {
   padding: 14px;
+  background: var(--app-surface);
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
 }
 
 .preview-card.full {
@@ -472,6 +510,9 @@ onMounted(loadData);
 .tree-shell {
   width: 100%;
   overflow: hidden;
+  background: var(--app-surface);
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
 }
 
 .tree-toolbar {
@@ -499,11 +540,5 @@ onMounted(loadData);
 .tree-node code {
   color: var(--app-text-secondary);
   font-size: 11px;
-}
-
-@media (max-width: 1100px) {
-  .role-layout {
-    grid-template-columns: 1fr;
-  }
 }
 </style>

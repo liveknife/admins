@@ -1258,7 +1258,7 @@ func seedSiteContent(db *sql.DB, d *Dialect) error {
 			featured                              bool
 			sort                                  int
 		}{
-			{"Admins 管理系统", "Vue Admin + Go Gin 的权限后台和内容管理平台。", "包含 RBAC、聊天、系统工具、官网内容管理和数据表结构查看。", "Vue Admin,Go Gin,PostgreSQL,RBAC", true, 10},
+			{"困困工作管理系统", "Vue Admin + Go Gin 的权限后台和内容管理平台。", "包含 RBAC、聊天、系统工具、官网内容管理和数据表结构查看。", "Vue Admin,Go Gin,PostgreSQL,RBAC", true, 10},
 			{"技术实验室官网", "React + Three.js 驱动的个人博客官网。", "前台展示公告、轮播、学习笔记、项目 Demo 和技术星图。", "React,Three.js,Vite,Go Gin", true, 20},
 			{"数据库结构看板", "从数据库元数据生成字段说明和结构视图。", "用于查看表字段、索引大小、字段注释和基础元信息。", "PostgreSQL,Schema,Go", false, 30},
 		}
@@ -1294,7 +1294,7 @@ func seedDefaultAdmin(db *sql.DB, d *Dialect) error {
 	username := strings.TrimSpace(envOr("DEFAULT_ADMIN_USERNAME", "admin"))
 	email := strings.ToLower(envOr("DEFAULT_ADMIN_EMAIL", "admin@example.com"))
 	phone := normalizePhone(envOr("DEFAULT_ADMIN_PHONE", "13800000000"))
-	password := envOr("DEFAULT_ADMIN_PASSWORD", "admin123")
+	password := envOr("DEFAULT_ADMIN_PASSWORD", "Admin@123")
 	if username == "" || email == "" || password == "" {
 		return nil
 	}

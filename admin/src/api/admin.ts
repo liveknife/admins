@@ -345,6 +345,19 @@ export const deactivateAdminUser = (id: number) => {
   return http.request<{ message: string }>("delete", `/api/v1/admin/users/${id}`);
 };
 
+// 管理员永久删除用户（硬删除，不可恢复）
+export const deleteAdminUser = (id: number) => {
+  return http.request<{ message: string }>("delete", `/api/v1/admin/users/${id}/permanent`);
+};
+
+// 恢复已禁用用户并重置密码为默认密码
+export const reactivateAdminUser = (id: number) => {
+  return http.request<{ message: string; user: GoUser }>(
+    "put",
+    `/api/v1/admin/users/${id}/reactivate`
+  );
+};
+
 export const getAdminRoles = (params?: PageParams) => {
   return http.request<PagedResult<"roles", GoRole>>(
     "get",

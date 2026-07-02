@@ -6,6 +6,7 @@ node_modules/
 .env.*
 !go_demo/.env.example
 .claude
+.codebuddy
 # Build output
 dist/
 dist-ssr/

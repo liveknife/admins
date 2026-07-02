@@ -13,6 +13,7 @@ import {
   uploadAvatarApi,
   type GoUser
 } from "@/api/user";
+import { useUserStoreHook } from "@/store/modules/user";
 
 defineOptions({ name: "Profile" });
 
@@ -77,6 +78,11 @@ const saveProfile = () => {
         phone: profileForm.phone,
         avatar_url: profileForm.avatar_url
       });
+      // 同步到全局 store
+      const fullUrl = profileForm.avatar_url
+        ? (/^https?:\/\//.test(profileForm.avatar_url) ? profileForm.avatar_url : `${apiBase}${profileForm.avatar_url}`)
+        : "";
+      useUserStoreHook().SET_AVATAR(fullUrl);
       message("资料已更新", { type: "success" });
       loadProfile();
     } catch (err: any) {
@@ -109,6 +115,9 @@ const onAvatarPicked = async (raw: { file: File }) => {
   try {
     const { avatar_url } = await uploadAvatarApi(raw.file);
     profileForm.avatar_url = avatar_url;
+    // 同步到全局 store，让导航栏头像立即更新
+    const fullUrl = /^https?:\/\//.test(avatar_url) ? avatar_url : `${apiBase}${avatar_url}`;
+    useUserStoreHook().SET_AVATAR(fullUrl);
     message("头像已更新", { type: "success" });
   } catch (err: any) {
     message(err?.response?.data?.error || "上传失败", { type: "error" });

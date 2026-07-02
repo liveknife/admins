@@ -7,6 +7,7 @@ import (
 	"go-demo/config"
 	"go-demo/database"
 	"go-demo/routes"
+	"go-demo/services"
 )
 
 func main() {
@@ -24,6 +25,8 @@ func main() {
 	} else { defer redisClient.Close() }
 
 	r := routes.Setup(db.DB)
+
+	services.InitMailer() // 初始化邮件服务（未配置 SMTP 时自动降级为 dry-run 模式）
 
 	log.Printf("[%s] server running at http://localhost:%s", config.GetAppEnv(), port)
 	if config.IsProduction() { log.Print("[INFO] database=", database.CurrentDialect.Type, " | redis=", database.RedisClient != nil, " | gin=release") } else { config.PrintDevConfig() }
