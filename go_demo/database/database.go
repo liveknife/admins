@@ -413,7 +413,7 @@ func migrate(db *sql.DB, d *Dialect) error {
 func buildCreateTables(d *Dialect) []string {
 	pk, ts, now := d.AutoIncrement(), d.Timestamp(), d.Now()
 	return []string{
-		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS users(id %s,username VARCHAR(100) NOT NULL UNIQUE,email VARCHAR(255) NOT NULL UNIQUE,phone VARCHAR(20) NOT NULL DEFAULT '',password_hash TEXT NOT NULL,password_secret TEXT NOT NULL DEFAULT '',deleted_at %s,created_at %s NOT NULL DEFAULT %s,updated_at %s NOT NULL DEFAULT %s)`, pk, ts, ts, now, ts, now),
+		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS users(id %s,username VARCHAR(100) NOT NULL UNIQUE,email VARCHAR(255) NOT NULL UNIQUE,phone VARCHAR(20) NOT NULL DEFAULT '',password_hash TEXT NOT NULL,password_secret TEXT NOT NULL DEFAULT '',avatar_url VARCHAR(1024) NOT NULL DEFAULT '',deleted_at %s,created_at %s NOT NULL DEFAULT %s,updated_at %s NOT NULL DEFAULT %s)`, pk, ts, ts, now, ts, now),
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS password_reset_tokens(id %s,user_id BIGINT NOT NULL,token VARCHAR(255) NOT NULL UNIQUE,expires_at %s NOT NULL,used_at %s,created_at %s NOT NULL DEFAULT %s,CONSTRAINT fk_reset_user FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)`, pk, ts, ts, ts, now),
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS refresh_tokens(id %s,user_id BIGINT NOT NULL,token_hash VARCHAR(512) NOT NULL UNIQUE,expires_at %s NOT NULL,revoked_at %s,created_at %s NOT NULL DEFAULT %s,CONSTRAINT fk_refresh_user FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)`, pk, ts, ts, ts, now),
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS roles(id %s,name VARCHAR(50) NOT NULL UNIQUE,description TEXT NOT NULL DEFAULT '',created_at %s NOT NULL DEFAULT %s,updated_at %s NOT NULL DEFAULT %s)`, pk, ts, now, ts, now),
@@ -446,6 +446,7 @@ func ensureColumns(db *sql.DB, d *Dialect) error {
 		"phone":           `ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20) NOT NULL DEFAULT ''`,
 		"deleted_at":      fmt.Sprintf("ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at %s", d.Timestamp()),
 		"password_secret": `ALTER TABLE users ADD COLUMN IF NOT EXISTS password_secret TEXT NOT NULL DEFAULT ''`,
+		"avatar_url":      `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(1024) NOT NULL DEFAULT ''`,
 	}
 	for col, stmt := range userCols {
 		if !columnExists(db, d, "users", col) {

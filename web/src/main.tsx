@@ -2,136 +2,23 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import * as THREE from "three";
 import "./styles.css";
-
-type SiteAnnouncement = {
-  id: number;
-  title: string;
-  content: string;
-  link_url: string;
-};
-
-type SiteBanner = {
-  id: number;
-  title: string;
-  subtitle: string;
-  image_url: string;
-  link_url: string;
-};
-
-type SiteResource = {
-  id: number;
-  title: string;
-  slug: string;
-  summary: string;
-  content: string;
-  markdown_content: string;
-  category: string;
-  cover_url: string;
-  link_url: string;
-  tags: string;
-  seo_title: string;
-  seo_description: string;
-  seo_keywords: string;
-  is_featured: boolean;
-  view_count: number;
-};
-
-type SiteTechStack = {
-  id: number;
-  name: string;
-  category: string;
-  level: number;
-  icon_url: string;
-  description: string;
-};
-
-type SiteProject = {
-  id: number;
-  name: string;
-  summary: string;
-  description: string;
-  cover_url: string;
-  demo_url: string;
-  repo_url: string;
-  stack_tags: string;
-  status: string;
-  is_featured: boolean;
-};
-
-type SiteTimelineEvent = {
-  id: number;
-  title: string;
-  summary: string;
-  content: string;
-  phase: string;
-  event_type: string;
-  tags: string;
-  link_url: string;
-  status: string;
-  is_featured: boolean;
-  sort_order: number;
-  happened_at?: string;
-  published_at?: string;
-};
-
-type SiteHome = {
-  announcements: SiteAnnouncement[];
-  banners: SiteBanner[];
-  resources: SiteResource[];
-  tech_stacks: SiteTechStack[];
-  projects: SiteProject[];
-  timeline: SiteTimelineEvent[];
-  messages: SiteMessage[];
-  analytics: SitePublicStats;
-};
-
-type SiteMessage = {
-  id: number;
-  visitor_name: string;
-  content: string;
-  reply: string;
-  created_at: string;
-};
-
-type SitePublicStats = {
-  visit_count: number;
-  article_count: number;
-  message_count: number;
-};
-
-type KnowledgeAnswer = {
-  question: string;
-  answer: string;
-  matches: SiteResource[];
-  projects: SiteProject[];
-};
-
-const emptyHome: SiteHome = {
-  announcements: [],
-  banners: [],
-  resources: [],
-  tech_stacks: [],
-  projects: [],
-  timeline: [],
-  messages: [],
-  analytics: { visit_count: 0, article_count: 0, message_count: 0 }
-};
-
-const apiBase = import.meta.env.VITE_API_BASE_URL || "";
-const assetURL = (url?: string) => {
-  if (!url) return "";
-  if (/^https?:\/\//.test(url)) return url;
-  return `${apiBase}${url}`;
-};
-
-const splitTags = (value?: string) =>
-  (value ?? "")
-    .split(",")
-    .map(item => item.trim())
-    .filter(Boolean);
-
-const articleHref = (item: SiteResource) =>
-  `${apiBase}/api/v1/site/resources/${encodeURIComponent(item.slug || String(item.id))}`;
+import {
+  apiBase,
+  articleRouteHash,
+  assetURL,
+  emptyHome,
+  splitTags,
+  type SiteHome,
+  type SiteProject,
+  type SiteResource,
+  type SiteTechStack,
+  type SiteTimelineEvent,
+  type SiteMessage,
+  type KnowledgeAnswer
+} from "./shared";
+import { navigate, searchHash, useHashRoute } from "./router";
+import { ArticleDetail } from "./ArticleDetail";
+import { SearchPage } from "./SearchPage";
 
 function KnowledgeAsk({ resources }: { resources: SiteResource[] }) {
   const [question, setQuestion] = useState("React 项目经验怎么总结？");
@@ -174,7 +61,16 @@ function KnowledgeAsk({ resources }: { resources: SiteResource[] }) {
           <p>{answer?.answer ?? "这个入口会基于你在后台发布的文章、笔记和项目内容做本地检索式回答。"}</p>
           <div className="answerLinks">
             {answer?.matches?.map(item => (
-              <a key={item.id} href={articleHref(item)} target="_blank" rel="noreferrer">{item.title}</a>
+              <a
+                key={item.id}
+                href={articleRouteHash(item)}
+                onClick={event => {
+                  event.preventDefault();
+                  navigate(articleRouteHash(item));
+                }}
+              >
+                {item.title}
+              </a>
             ))}
             {answer?.projects?.map(item => (
               <a key={`p-${item.id}`} href={item.demo_url || item.repo_url || "#"} target="_blank" rel="noreferrer">{item.name}</a>
@@ -333,19 +229,11 @@ function TechOrbit({ stacks }: { stacks: SiteTechStack[] }) {
   return <div className="orbit" ref={mountRef} aria-label="技术轨道动画" />;
 }
 
-function ProjectGalaxy({
-  stacks,
-  projects
-}: {
-  stacks: SiteTechStack[];
-  projects: SiteProject[];
-}) {
+function ProjectGalaxy({ stacks, projects }: { stacks: SiteTechStack[]; projects: SiteProject[] }) {
   const [active, setActive] = useState<string>(stacks[0]?.name ?? "React");
   const nodes = useMemo<SiteTechStack[]>(() => {
     if (stacks.length) return stacks.slice(0, 8);
-    const names = Array.from(
-      new Set(projects.flatMap(project => splitTags(project.stack_tags)))
-    ).slice(0, 8);
+    const names = Array.from(new Set(projects.flatMap(project => splitTags(project.stack_tags)))).slice(0, 8);
     return names.map((name, index) => ({
       id: -index - 1,
       name,
@@ -459,14 +347,12 @@ function TimelineLab({ events }: { events: SiteTimelineEvent[] }) {
 
 function RocketButton() {
   const [visible, setVisible] = useState(false);
-
   useEffect(() => {
     const onScroll = () => setVisible(window.scrollY > 420);
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
-
   return (
     <button
       className={`rocketButton ${visible ? "visible" : ""}`}
@@ -474,44 +360,52 @@ function RocketButton() {
       aria-label="回到首页"
       onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
     >
-      <span>▲</span>
-      <i />
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 19V5M5 12l7-7 7 7" />
+      </svg>
     </button>
   );
 }
 
-function App() {
-  const [home, setHome] = useState<SiteHome>(emptyHome);
-  const [loading, setLoading] = useState(true);
+/** 首页头部搜索框 —— 复用到 hero */
+function HeroSearchBar() {
+  const [q, setQ] = useState("");
+  return (
+    <form
+      className="heroSearch"
+      onSubmit={event => {
+        event.preventDefault();
+        if (!q.trim()) return;
+        navigate(searchHash(q.trim()));
+      }}
+    >
+      <input
+        value={q}
+        onChange={event => setQ(event.target.value)}
+        placeholder="搜索文章 / 笔记 / 项目"
+      />
+      <button type="submit">搜索</button>
+    </form>
+  );
+}
+
+function HomePage({ home, loading }: { home: SiteHome; loading: boolean }) {
   const [activeBanner, setActiveBanner] = useState(0);
   const [isBannerPaused, setIsBannerPaused] = useState(false);
 
-  useEffect(() => {
-    fetch(`${apiBase}/api/v1/site/home`)
-      .then(res => res.json())
-      .then(res => setHome(res.home ?? emptyHome))
-      .catch(() => setHome(emptyHome))
-      .finally(() => setLoading(false));
-  }, []);
+  const banner = home.banners[activeBanner] ?? home.banners[0];
+  const featured = useMemo(
+    () => home.resources.filter(item => item.is_featured).slice(0, 3),
+    [home.resources]
+  );
 
   useEffect(() => {
-    const payload = JSON.stringify({
-      path: window.location.pathname + window.location.hash,
-      referrer: document.referrer,
-      device: window.innerWidth < 768 ? "mobile" : "desktop"
-    });
-    const url = `${apiBase}/api/v1/site/visit`;
-    if (navigator.sendBeacon) {
-      navigator.sendBeacon(url, new Blob([payload], { type: "application/json" }));
-      return;
-    }
-    fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: payload,
-      keepalive: true
-    }).catch(() => undefined);
-  }, []);
+    if (home.banners.length <= 1 || isBannerPaused) return;
+    const timer = window.setInterval(() => {
+      setActiveBanner(index => (index + 1) % home.banners.length);
+    }, 4200);
+    return () => window.clearInterval(timer);
+  }, [home.banners.length, isBannerPaused]);
 
   useEffect(() => {
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -542,25 +436,11 @@ function App() {
     return () => observer.disconnect();
   }, [home]);
 
-  const banner = home.banners[activeBanner] ?? home.banners[0];
-  const featured = useMemo(
-    () => home.resources.filter(item => item.is_featured).slice(0, 3),
-    [home.resources]
-  );
-
-  useEffect(() => {
-    if (home.banners.length <= 1 || isBannerPaused) return;
-    const timer = window.setInterval(() => {
-      setActiveBanner(index => (index + 1) % home.banners.length);
-    }, 4200);
-    return () => window.clearInterval(timer);
-  }, [home.banners.length, isBannerPaused]);
-
   return (
-    <main>
+    <>
       <section className="hero">
         <nav className="nav">
-          <span className="brand">Tech Lab</span>
+          <a className="brand" href="#/">Tech Lab</a>
           <div>
             <a href="#resources">学习</a>
             <a href="#ask">问答</a>
@@ -569,6 +449,7 @@ function App() {
             <a href="#demos">Demo</a>
             <a href="#messages">留言</a>
             <a href="#timeline">时间轴</a>
+            <a href={searchHash("")}>搜索</a>
           </div>
         </nav>
 
@@ -583,6 +464,7 @@ function App() {
             <p>
               这里放我的技术栈、源码笔记、项目复盘和正在打磨的想法。内容由 Admins 管理端发布，前台实时读取。
             </p>
+            <HeroSearchBar />
             <div className="heroActions">
               <a href="#resources">查看学习资源</a>
               <a href="#ask">问我的知识库</a>
@@ -646,7 +528,15 @@ function App() {
               <div className="tagRow">
                 {splitTags(item.tags).slice(0, 4).map(tag => <span key={tag}>{tag}</span>)}
               </div>
-              <a href={item.link_url || articleHref(item)} target="_blank" rel="noreferrer">阅读文章</a>
+              <a
+                href={articleRouteHash(item)}
+                onClick={event => {
+                  event.preventDefault();
+                  navigate(articleRouteHash(item));
+                }}
+              >
+                阅读文章
+              </a>
             </article>
           ))}
           {!loading && home.resources.length === 0 && <p className="empty">后台发布资源后会显示在这里。</p>}
@@ -712,6 +602,64 @@ function App() {
       </section>
 
       <TimelineLab events={home.timeline} />
+    </>
+  );
+}
+
+function App() {
+  const [home, setHome] = useState<SiteHome>(emptyHome);
+  const [loading, setLoading] = useState(true);
+  const route = useHashRoute();
+
+  useEffect(() => {
+    fetch(`${apiBase}/api/v1/site/home`)
+      .then(res => res.json())
+      .then(res => setHome(res.home ?? emptyHome))
+      .catch(() => setHome(emptyHome))
+      .finally(() => setLoading(false));
+  }, []);
+
+  // 访问统计上报（首次进站）
+  useEffect(() => {
+    const payload = JSON.stringify({
+      path: window.location.pathname + window.location.hash,
+      referrer: document.referrer,
+      device: window.innerWidth < 768 ? "mobile" : "desktop"
+    });
+    const url = `${apiBase}/api/v1/site/visit`;
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon(url, new Blob([payload], { type: "application/json" }));
+      return;
+    }
+    fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload,
+      keepalive: true
+    }).catch(() => undefined);
+  }, []);
+
+  // 详情页 / 搜索页顶部导航
+  const showTopBar = route.name !== "home";
+
+  return (
+    <main>
+      {showTopBar && (
+        <nav className="innerNav">
+          <a className="brand" href="#/">Tech Lab</a>
+          <a href={searchHash("")}>搜索</a>
+        </nav>
+      )}
+      {route.name === "home" && <HomePage home={home} loading={loading} />}
+      {route.name === "article" && <ArticleDetail slug={route.slug} />}
+      {route.name === "search" && (
+        <SearchPage
+          query={route.q}
+          category={route.category}
+          tag={route.tag}
+          page={route.page}
+        />
+      )}
       <RocketButton />
     </main>
   );

@@ -108,9 +108,9 @@ func (s *AuthService) Login(ctx context.Context, account, password string) (*mod
 	account = normalizeLoginAccount(account)
 	var user models.User; var passwordHash string; var deletedAt sql.NullTime
 	err := database.QueryRowCtx(ctx, s.db,
-		`SELECT id,username,email,phone,password_hash,created_at,deleted_at FROM users WHERE lower(username)=$1 OR lower(email)=$2 OR phone=$3 LIMIT 1`,
+		`SELECT id,username,email,phone,COALESCE(avatar_url,''),password_hash,created_at,deleted_at FROM users WHERE lower(username)=$1 OR lower(email)=$2 OR phone=$3 LIMIT 1`,
 		strings.ToLower(account), strings.ToLower(account), account).
-		Scan(&user.ID, &user.Username, &user.Email, &user.Phone, &passwordHash, &user.CreatedAt, &deletedAt)
+		Scan(&user.ID, &user.Username, &user.Email, &user.Phone, &user.AvatarURL, &passwordHash, &user.CreatedAt, &deletedAt)
 	if errors.Is(err, sql.ErrNoRows) { return nil, nil, ErrInvalidCredentials }
 	if err != nil { return nil, nil, err }
 	if deletedAt.Valid { return nil, nil, ErrUserDeactivated }
@@ -134,9 +134,9 @@ func (s *AuthService) RefreshTokens(ctx context.Context, refreshToken string) (*
 
 	var tokenID int64; var user models.User; var deletedAt sql.NullTime
 	err = database.QueryRowTxCtx(ctx, tx,
-		`SELECT rt.id,u.id,u.username,u.email,u.phone,u.created_at,u.deleted_at FROM refresh_tokens rt JOIN users u ON u.id=rt.user_id WHERE rt.token_hash=$1 AND rt.revoked_at IS NULL AND rt.expires_at>$2 LIMIT 1`,
+		`SELECT rt.id,u.id,u.username,u.email,u.phone,COALESCE(u.avatar_url,''),u.created_at,u.deleted_at FROM refresh_tokens rt JOIN users u ON u.id=rt.user_id WHERE rt.token_hash=$1 AND rt.revoked_at IS NULL AND rt.expires_at>$2 LIMIT 1`,
 		hashToken(refreshToken), time.Now()).
-		Scan(&tokenID, &user.ID, &user.Username, &user.Email, &user.Phone, &user.CreatedAt, &deletedAt)
+		Scan(&tokenID, &user.ID, &user.Username, &user.Email, &user.Phone, &user.AvatarURL, &user.CreatedAt, &deletedAt)
 	if err == nil {
 		if deletedAt.Valid { return nil, nil, ErrRefreshInvalid }
 		s.loadUserAccess(ctx, &user)
@@ -212,8 +212,8 @@ func (s *AuthService) ResetPassword(ctx context.Context, token, newPassword stri
 func (s *AuthService) GetUserByID(ctx context.Context, id int64) (*models.User, error) {
 	var user models.User; var deletedAt sql.NullTime
 	err := database.QueryRowCtx(ctx, s.db,
-		`SELECT id,username,email,phone,created_at,deleted_at FROM users WHERE id=$1`, id).
-		Scan(&user.ID, &user.Username, &user.Email, &user.Phone, &user.CreatedAt, &deletedAt)
+		`SELECT id,username,email,phone,COALESCE(avatar_url,''),created_at,deleted_at FROM users WHERE id=$1`, id).
+		Scan(&user.ID, &user.Username, &user.Email, &user.Phone, &user.AvatarURL, &user.CreatedAt, &deletedAt)
 	if err != nil { return nil, err }
 	if deletedAt.Valid { user.DeletedAt = &deletedAt.Time }
 	s.loadUserAccess(ctx, &user)
@@ -342,4 +342,81 @@ func (s *AuthService) permissionsForUserID(ctx context.Context, userID int64) ([
 	if err != nil { return nil, err }; defer rows.Close()
 	var out []string; for rows.Next() { var p string; if err := rows.Scan(&p); err != nil { return nil, err }; out = append(out, p) }
 	return out, rows.Err()
+}
+
+// ──────────────────────────────────────────────
+// 个人中心：更新资料 / 修改密码 / 头像
+// ──────────────────────────────────────────────
+
+// ProfileInput 表示个人资料的更新字段。
+type ProfileInput struct {
+	Username  string
+	Email     string
+	Phone     string
+	AvatarURL string
+}
+
+// UpdateProfile 更新当前用户的基础资料。avatar_url 为空字符串时不覆盖头像。
+func (s *AuthService) UpdateProfile(ctx context.Context, userID int64, input ProfileInput) (*models.User, error) {
+	username := strings.TrimSpace(input.Username)
+	email := strings.ToLower(strings.TrimSpace(input.Email))
+	phone := config.NormalizePhone(input.Phone)
+	avatar := strings.TrimSpace(input.AvatarURL)
+
+	nowFn := database.Now()
+	var (
+		result sql.Result
+		err    error
+	)
+	if avatar == "" {
+		result, err = database.ExecCtx(ctx, s.db,
+			`UPDATE users SET username=$1,email=$2,phone=$3,updated_at=`+nowFn+` WHERE id=$4 AND deleted_at IS NULL`,
+			username, email, phone, userID)
+	} else {
+		result, err = database.ExecCtx(ctx, s.db,
+			`UPDATE users SET username=$1,email=$2,phone=$3,avatar_url=$4,updated_at=`+nowFn+` WHERE id=$5 AND deleted_at IS NULL`,
+			username, email, phone, avatar, userID)
+	}
+	if err != nil {
+		if strings.Contains(err.Error(), "unique") || strings.Contains(err.Error(), "duplicate") {
+			return nil, ErrUserExists
+		}
+		return nil, err
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return nil, ErrUserNotFound
+	}
+	return s.GetUserByID(ctx, userID)
+}
+
+// ChangePassword 校验旧密码后写入新密码，同时吊销所有 refresh token。
+func (s *AuthService) ChangePassword(ctx context.Context, userID int64, oldPassword, newPassword string) error {
+	var storedHash string
+	err := database.QueryRowCtx(ctx, s.db, `SELECT password_hash FROM users WHERE id=$1 AND deleted_at IS NULL`, userID).Scan(&storedHash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrUserNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(oldPassword)) != nil {
+		return ErrInvalidCredentials
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	s.updatePasswordTx(ctx, tx, userID, newPassword)
+	return tx.Commit()
+}
+
+// SetAvatar 只更新头像 URL。用户中心上传头像后调用。
+func (s *AuthService) SetAvatar(ctx context.Context, userID int64, avatarURL string) error {
+	nowFn := database.Now()
+	_, err := database.ExecCtx(ctx, s.db,
+		`UPDATE users SET avatar_url=$1,updated_at=`+nowFn+` WHERE id=$2 AND deleted_at IS NULL`,
+		strings.TrimSpace(avatarURL), userID)
+	return err
 }

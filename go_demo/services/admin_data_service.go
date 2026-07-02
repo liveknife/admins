@@ -719,6 +719,71 @@ func (s *AdminDataService) GetSiteResourceBySlug(ctx context.Context, slug strin
 	return &item, nil
 }
 
+// SearchSiteResources 全文搜索已发布文章。使用 LOWER + LIKE 保证跨方言可用；
+// 标题命中权重最高，次为标签/分类/摘要，最后是正文/markdown。
+func (s *AdminDataService) SearchSiteResources(ctx context.Context, query, category, tag string, page, pageSize int) ([]models.SiteResource, int64, error) {
+	terms := tokenizeQuery(query)
+	if len(terms) == 0 {
+		return []models.SiteResource{}, 0, nil
+	}
+
+	where := []string{"status='published'"}
+	args := []any{}
+	// 每个词都必须命中 (AND)。所有列都要 LOWER 比较。
+	for _, term := range terms {
+		args = append(args, "%"+strings.ToLower(term)+"%")
+		idx := len(args)
+		where = append(where, fmt.Sprintf(
+			"(LOWER(title) LIKE $%d OR LOWER(summary) LIKE $%d OR LOWER(tags) LIKE $%d OR LOWER(category) LIKE $%d OR LOWER(content) LIKE $%d OR LOWER(markdown_content) LIKE $%d)",
+			idx, idx, idx, idx, idx, idx))
+	}
+	if category = strings.TrimSpace(category); category != "" {
+		args = append(args, category)
+		where = append(where, fmt.Sprintf("category=$%d", len(args)))
+	}
+	if tag = strings.TrimSpace(tag); tag != "" {
+		args = append(args, "%"+strings.ToLower(tag)+"%")
+		where = append(where, fmt.Sprintf("LOWER(tags) LIKE $%d", len(args)))
+	}
+	whereSQL := "WHERE " + strings.Join(where, " AND ")
+
+	var total int64
+	if err := database.QueryRowCtx(ctx, s.db, `SELECT COUNT(*) FROM site_resources `+whereSQL, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	if total == 0 {
+		return []models.SiteResource{}, 0, nil
+	}
+
+	// 排序表达式：标题命中优先 → is_featured → view_count → id
+	// 用第一个词做粗排即可；细化可以在应用层根据 scoreText 二次排序
+	firstTerm := "%" + strings.ToLower(terms[0]) + "%"
+	args = append(args, firstTerm)
+	rankIdx := len(args)
+	limit, offset := normalizePagination(page, pageSize)
+	args = append(args, limit, offset)
+	limitIdx, offsetIdx := len(args)-1, len(args)
+
+	rows, err := database.QueryCtx(ctx, s.db,
+		siteResourceSelect()+` FROM site_resources `+whereSQL+
+			fmt.Sprintf(` ORDER BY CASE WHEN LOWER(title) LIKE $%d THEN 0 ELSE 1 END,is_featured DESC,view_count DESC,id DESC LIMIT $%d OFFSET $%d`,
+				rankIdx, limitIdx, offsetIdx),
+		args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	items := make([]models.SiteResource, 0)
+	for rows.Next() {
+		item, err := scanSiteResource(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		items = append(items, item)
+	}
+	return items, total, rows.Err()
+}
+
 func (s *AdminDataService) ListSiteTechStacks(ctx context.Context, page, pageSize int, status string) ([]models.SiteTechStack, int64, error) {
 	where := "WHERE 1=1"
 	if status == "active" {

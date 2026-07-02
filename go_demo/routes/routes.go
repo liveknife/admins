@@ -3,9 +3,12 @@ package routes
 import (
 	"database/sql"
 	"net/http"
+	"time"
 
 	"go-demo/controllers"
+	"go-demo/docs"
 	"go-demo/middlewares"
+	"go-demo/models"
 	"go-demo/services"
 
 	"github.com/gin-gonic/gin"
@@ -16,123 +19,356 @@ func Setup(db *sql.DB) *gin.Engine {
 	r := gin.Default()
 	r.Static("/uploads", "./uploads")
 
-	// 创建服务与控制器
 	authService := services.NewAuthService(db)
 	adminData := services.NewAdminDataService(db)
 	monitorService := services.NewMonitorService(db)
-	authCtrl := controllers.NewAuthController(authService)
+	captchaService := services.NewCaptchaService()
+	authCtrl := controllers.NewAuthController(authService, captchaService)
 	adminCtrl := controllers.NewAdminController(authService, adminData, monitorService)
 	chatCtrl := controllers.NewChatController(db, authService)
 	monitorService.SetRuntimeStatsProvider(chatCtrl)
 	r.Use(middlewares.RequestMonitor(monitorService))
 
-	// 公开路由
 	r.GET("/", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"message": "Welcome to Go Demo API"}) })
 	r.GET("/health", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 
-	api := r.Group("/api/v1")
-	{
-		api.GET("/ping", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"message": "pong"}) })
-		api.GET("/password-public-key", authCtrl.PasswordPublicKey)
-		api.GET("/site/home", adminCtrl.PublicSiteHome)
-		api.GET("/site/resources/:slug", adminCtrl.PublicSiteResource)
-		api.POST("/site/knowledge", adminCtrl.PublicSiteKnowledge)
-		api.POST("/site/messages", adminCtrl.PublicSiteMessage)
-		api.POST("/site/visit", adminCtrl.PublicSiteVisit)
-		api.GET("/chat/ws", chatCtrl.WebSocket)
-		api.POST("/register", authCtrl.Register)
-		api.POST("/login", authCtrl.Login)
-		api.POST("/refresh-token", authCtrl.RefreshToken)
-		api.POST("/forgot-password", authCtrl.ForgotPassword)
-		api.POST("/reset-password", authCtrl.ResetPassword)
+	specs := buildRouteSpecs(authService, authCtrl, adminCtrl, chatCtrl)
+	mount(r, specs, authService)
 
-		// 认证路由
-		protected := api.Group("")
-		protected.Use(middlewares.AuthMiddleware(authService))
-		{
-			protected.GET("/me", authCtrl.Me)
-
-			// 聊天路由
-			protected.GET("/chat/users", middlewares.RequirePermission(authService, "messages:chat"), chatCtrl.ListUsers)
-			protected.GET("/chat/history/:id", middlewares.RequirePermission(authService, "messages:chat"), chatCtrl.History)
-			protected.POST("/chat/upload", middlewares.RequirePermission(authService, "messages:chat"), chatCtrl.Upload)
-			protected.POST("/chat/translate", middlewares.RequirePermission(authService, "messages:chat"), chatCtrl.Translate)
-			protected.POST("/chat/read/:id", middlewares.RequirePermission(authService, "messages:chat"), chatCtrl.MarkRead)
-
-			// 管理员路由
-			admin := protected.Group("/admin")
-			admin.Use(middlewares.RequirePermission(authService, "admin:access"))
-			{
-				admin.GET("/dashboard", adminCtrl.Dashboard)
-
-				// 用户管理
-				admin.GET("/users", middlewares.RequirePermission(authService, "users:read"), adminCtrl.ListUsers)
-				admin.POST("/users", middlewares.RequirePermission(authService, "users:write"), adminCtrl.CreateUser)
-				admin.PUT("/users/:id", middlewares.RequirePermission(authService, "users:write"), adminCtrl.UpdateUser)
-				admin.PUT("/users/:id/roles", middlewares.RequirePermission(authService, "users:write"), adminCtrl.SetUserRoles)
-				admin.GET("/users/:id/password", middlewares.RequirePermission(authService, "users:password:read"), adminCtrl.GetUserPassword)
-				admin.PUT("/users/:id/password", middlewares.RequirePermission(authService, "users:write"), adminCtrl.ResetUserPassword)
-				admin.DELETE("/users/:id", middlewares.RequirePermission(authService, "users:write"), adminCtrl.DeactivateUser)
-
-				// 角色管理
-				admin.GET("/roles", middlewares.RequirePermission(authService, "roles:read"), adminCtrl.ListRoles)
-				admin.POST("/roles", middlewares.RequirePermission(authService, "roles:write"), adminCtrl.CreateRole)
-				admin.PUT("/roles/:id", middlewares.RequirePermission(authService, "roles:write"), adminCtrl.UpdateRole)
-				admin.DELETE("/roles/:id", middlewares.RequirePermission(authService, "roles:write"), adminCtrl.DeleteRole)
-
-				// 权限列表
-				admin.GET("/permissions", middlewares.RequirePermission(authService, "permissions:read"), adminCtrl.ListPermissions)
-				admin.GET("/permissions/tree", middlewares.RequirePermission(authService, "permissions:read"), adminCtrl.PermissionTree)
-				admin.GET("/roles/:id/preview", middlewares.RequirePermission(authService, "roles:read"), adminCtrl.RolePreview)
-
-				// 操作日志
-				admin.GET("/operation-logs", middlewares.RequirePermission(authService, "logs:read"), adminCtrl.ListOperationLogs)
-
-				// 通知中心
-				admin.GET("/notifications", middlewares.RequirePermission(authService, "notifications:read"), adminCtrl.ListNotifications)
-				admin.GET("/notifications/unread-count", middlewares.RequirePermission(authService, "notifications:read"), adminCtrl.UnreadNotificationCount)
-				admin.PUT("/notifications/:id/read", middlewares.RequirePermission(authService, "notifications:write"), adminCtrl.MarkNotificationRead)
-				admin.PUT("/notifications/read-all", middlewares.RequirePermission(authService, "notifications:write"), adminCtrl.MarkAllNotificationsRead)
-
-				// AI 助手与系统健康
-				admin.POST("/ai/ask", middlewares.RequirePermission(authService, "ai:assistant"), adminCtrl.AskAssistant)
-				admin.GET("/health", middlewares.RequirePermission(authService, "health:read"), adminCtrl.SystemHealth)
-				admin.GET("/database/catalog", middlewares.RequirePermission(authService, "database:read"), adminCtrl.DatabaseCatalog)
-				admin.GET("/database/tables", middlewares.RequirePermission(authService, "database:read"), adminCtrl.ListDatabaseTables)
-				admin.GET("/database/tables/:table/columns", middlewares.RequirePermission(authService, "database:read"), adminCtrl.ListDatabaseColumns)
-
-				admin.GET("/site/announcements", middlewares.RequirePermission(authService, "site:read"), adminCtrl.ListSiteAnnouncements)
-				admin.POST("/site/announcements", middlewares.RequirePermission(authService, "site:write"), adminCtrl.CreateSiteAnnouncement)
-				admin.PUT("/site/announcements/:id", middlewares.RequirePermission(authService, "site:write"), adminCtrl.UpdateSiteAnnouncement)
-				admin.DELETE("/site/announcements/:id", middlewares.RequirePermission(authService, "site:write"), adminCtrl.DeleteSiteAnnouncement)
-				admin.GET("/site/banners", middlewares.RequirePermission(authService, "site:read"), adminCtrl.ListSiteBanners)
-				admin.POST("/site/banners", middlewares.RequirePermission(authService, "site:write"), adminCtrl.CreateSiteBanner)
-				admin.PUT("/site/banners/:id", middlewares.RequirePermission(authService, "site:write"), adminCtrl.UpdateSiteBanner)
-				admin.DELETE("/site/banners/:id", middlewares.RequirePermission(authService, "site:write"), adminCtrl.DeleteSiteBanner)
-				admin.GET("/site/resources", middlewares.RequirePermission(authService, "site:read"), adminCtrl.ListSiteResources)
-				admin.POST("/site/resources", middlewares.RequirePermission(authService, "site:write"), adminCtrl.SaveSiteResource)
-				admin.PUT("/site/resources/:id", middlewares.RequirePermission(authService, "site:write"), adminCtrl.SaveSiteResource)
-				admin.DELETE("/site/resources/:id", middlewares.RequirePermission(authService, "site:write"), adminCtrl.DeleteSiteResource)
-				admin.GET("/site/tech-stacks", middlewares.RequirePermission(authService, "site:read"), adminCtrl.ListSiteTechStacks)
-				admin.POST("/site/tech-stacks", middlewares.RequirePermission(authService, "site:write"), adminCtrl.SaveSiteTechStack)
-				admin.PUT("/site/tech-stacks/:id", middlewares.RequirePermission(authService, "site:write"), adminCtrl.SaveSiteTechStack)
-				admin.DELETE("/site/tech-stacks/:id", middlewares.RequirePermission(authService, "site:write"), adminCtrl.DeleteSiteTechStack)
-				admin.GET("/site/projects", middlewares.RequirePermission(authService, "site:read"), adminCtrl.ListSiteProjects)
-				admin.POST("/site/projects", middlewares.RequirePermission(authService, "site:write"), adminCtrl.SaveSiteProject)
-				admin.PUT("/site/projects/:id", middlewares.RequirePermission(authService, "site:write"), adminCtrl.SaveSiteProject)
-				admin.DELETE("/site/projects/:id", middlewares.RequirePermission(authService, "site:write"), adminCtrl.DeleteSiteProject)
-				admin.GET("/site/timeline", middlewares.RequirePermission(authService, "site:read"), adminCtrl.ListSiteTimelineEvents)
-				admin.POST("/site/timeline", middlewares.RequirePermission(authService, "site:write"), adminCtrl.SaveSiteTimelineEvent)
-				admin.PUT("/site/timeline/:id", middlewares.RequirePermission(authService, "site:write"), adminCtrl.SaveSiteTimelineEvent)
-				admin.DELETE("/site/timeline/:id", middlewares.RequirePermission(authService, "site:write"), adminCtrl.DeleteSiteTimelineEvent)
-				admin.GET("/site/messages", middlewares.RequirePermission(authService, "site:read"), adminCtrl.ListSiteMessages)
-				admin.PUT("/site/messages/:id", middlewares.RequirePermission(authService, "site:write"), adminCtrl.SaveSiteMessage)
-				admin.DELETE("/site/messages/:id", middlewares.RequirePermission(authService, "site:write"), adminCtrl.DeleteSiteMessage)
-				admin.GET("/site/analytics", middlewares.RequirePermission(authService, "site:read"), adminCtrl.SiteAnalytics)
-				admin.POST("/site/upload", middlewares.RequirePermission(authService, "site:write"), adminCtrl.UploadSiteAsset)
-			}
-		}
-	}
+	// Swagger UI: /swagger/index.html
+	docs.Register(r, "/swagger", docs.Info{
+		Title:       "Admins Platform API",
+		Version:     "1.0.0",
+		Description: "后台管理平台 API 文档。所有以 `/api/v1/admin/*` 开头的路由需要 Bearer JWT，并按权限码授权。",
+		Schemas: []any{
+			models.User{}, models.TokenPair{}, models.SiteHome{}, models.SiteResource{},
+			models.SiteMessage{}, models.SiteProject{}, models.SiteTechStack{},
+			models.SiteAnnouncement{}, models.SiteBanner{}, models.SiteTimelineEvent{},
+			models.Notification{}, models.OperationLog{},
+		},
+	}, docRoutes(specs))
 
 	return r
+}
+
+// ──────────────────────────────────────────────
+// 路由声明：一处描述，同时喂给 Gin 与 Swagger
+// ──────────────────────────────────────────────
+
+type routeSpec struct {
+	Method     string
+	Path       string       // Gin path，含 :id
+	Handler    gin.HandlerFunc
+	Middleware []gin.HandlerFunc // 额外中间件（如限流）
+	Auth       bool         // 需要 Bearer JWT
+	Permission string       // 需要的权限码；空表示不校验
+	Doc        docs.Op
+}
+
+func mount(r *gin.Engine, specs []routeSpec, authService *services.AuthService) {
+	for _, s := range specs {
+		handlers := []gin.HandlerFunc{}
+		handlers = append(handlers, s.Middleware...)
+		if s.Auth {
+			handlers = append(handlers, middlewares.AuthMiddleware(authService))
+		}
+		if s.Permission != "" {
+			handlers = append(handlers, middlewares.RequirePermission(authService, s.Permission))
+		}
+		handlers = append(handlers, s.Handler)
+		r.Handle(s.Method, s.Path, handlers...)
+	}
+}
+
+func docRoutes(specs []routeSpec) []docs.Route {
+	out := make([]docs.Route, 0, len(specs))
+	for _, s := range specs {
+		op := s.Doc
+		op.Security = s.Auth
+		if s.Permission != "" {
+			op.Permission = s.Permission
+		}
+		out = append(out, docs.Route{Method: s.Method, Path: s.Path, Op: op})
+	}
+	return out
+}
+
+// ──────────────────────────────────────────────
+// 具体路由清单
+// ──────────────────────────────────────────────
+
+func buildRouteSpecs(
+	authService *services.AuthService,
+	authCtrl *controllers.AuthController,
+	adminCtrl *controllers.AdminController,
+	chatCtrl *controllers.ChatController,
+) []routeSpec {
+	_ = authService // 仅用于类型；实际中间件绑定在 mount 里完成
+
+	// 常用响应结构复用
+	respErr := docs.Resp{Description: "错误响应", Schema: map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"error": map[string]any{"type": "string", "description": "错误消息"},
+		},
+	}}
+	pageQuery := []docs.Param{
+		{Name: "page", In: "query", Type: "integer", Description: "页码，从 1 开始，默认 1"},
+		{Name: "page_size", In: "query", Type: "integer", Description: "每页数量，默认 10，最大 100"},
+	}
+
+	// 限流：登录 / 注册 / 忘记密码 / 图形验证码 / 留言 / 头像上传等
+	// 登录额外维度：account/email —— 单 IP 单账号计一次窗口，避免仅按 IP 时被拨号池绕过
+	loginLimit := middlewares.RateLimit("login", 8, time.Minute, extractAccountKey)
+	registerLimit := middlewares.RateLimit("register", 5, 10*time.Minute, nil)
+	forgotLimit := middlewares.RateLimit("forgot", 5, 10*time.Minute, nil)
+	captchaLimit := middlewares.RateLimit("captcha", 30, time.Minute, nil)
+	messageLimit := middlewares.RateLimit("site-message", 6, 10*time.Minute, nil)
+	avatarLimit := middlewares.RateLimit("avatar-upload", 10, 10*time.Minute, nil)
+	passwordLimit := middlewares.RateLimit("change-pw", 6, 10*time.Minute, nil)
+
+	specs := []routeSpec{
+		// ── 公开：健康、基础 ──
+		{Method: "GET", Path: "/api/v1/ping", Handler: pingHandler(), Doc: docs.Op{
+			Summary: "健康探针 (Ping)", Tags: []string{"Public"},
+			Responses: []docs.Resp{{Schema: map[string]any{"type": "object", "properties": map[string]any{"message": map[string]any{"type": "string", "example": "pong"}}}}},
+		}},
+		{Method: "GET", Path: "/api/v1/password-public-key", Handler: authCtrl.PasswordPublicKey, Doc: docs.Op{
+			Summary: "获取 RSA 密码传输公钥", Tags: []string{"Auth"},
+			Description: "客户端使用返回的公钥对明文密码进行 RSA-OAEP-SHA256 加密后传输。",
+			Responses: []docs.Resp{{Schema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"algorithm":  map[string]any{"type": "string", "example": "RSA-OAEP-256"},
+					"public_key": map[string]any{"type": "string", "description": "PEM 格式公钥"},
+				},
+			}}},
+		}},
+		{Method: "GET", Path: "/api/v1/captcha", Handler: authCtrl.Captcha, Middleware: []gin.HandlerFunc{captchaLimit}, Doc: docs.Op{
+			Summary: "获取图形验证码", Tags: []string{"Auth"},
+			Description: "返回 base64 编码的 PNG 图形验证码和对应的 captcha_id，登录时随请求一起提交。",
+			Responses: []docs.Resp{{Schema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"captcha_id": map[string]any{"type": "string"},
+					"image":      map[string]any{"type": "string", "description": "data:image/png;base64,..."},
+					"expires_in": map[string]any{"type": "integer", "description": "有效期(秒)"},
+				},
+			}}},
+		}},
+
+		// ── Auth ──
+		{Method: "POST", Path: "/api/v1/register", Handler: authCtrl.Register, Middleware: []gin.HandlerFunc{registerLimit}, Doc: docs.Op{
+			Summary: "注册用户", Tags: []string{"Auth"},
+			Body: docs.Body{Required: true, Schema: controllers.RegisterRequest{}},
+			Responses: []docs.Resp{
+				{Status: "201", Description: "注册成功", Schema: map[string]any{"type": "object", "properties": map[string]any{"user": docs.SchemaRef("User")}}},
+				{Status: "400", Schema: respErr.Schema}, {Status: "409", Description: "用户已存在", Schema: respErr.Schema},
+			},
+		}},
+		{Method: "POST", Path: "/api/v1/login", Handler: authCtrl.Login, Middleware: []gin.HandlerFunc{loginLimit}, Doc: docs.Op{
+			Summary: "登录", Tags: []string{"Auth"},
+			Description: "支持用户名 / 邮箱 / 手机号登录；密码必须先用 `/api/v1/password-public-key` 返回的公钥加密。",
+			Body: docs.Body{Required: true, Schema: controllers.LoginRequest{}},
+			Responses: []docs.Resp{
+				{Schema: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"user":   docs.SchemaRef("User"),
+						"tokens": docs.SchemaRef("TokenPair"),
+					},
+				}},
+				{Status: "401", Description: "账号或密码错误", Schema: respErr.Schema},
+				{Status: "429", Description: "登录尝试过于频繁", Schema: respErr.Schema},
+			},
+		}},
+		{Method: "POST", Path: "/api/v1/refresh-token", Handler: authCtrl.RefreshToken, Doc: docs.Op{
+			Summary: "刷新访问令牌", Tags: []string{"Auth"},
+			Body: docs.Body{Required: true, Schema: controllers.RefreshTokenRequest{}},
+		}},
+		{Method: "POST", Path: "/api/v1/forgot-password", Handler: authCtrl.ForgotPassword, Middleware: []gin.HandlerFunc{forgotLimit}, Doc: docs.Op{
+			Summary: "创建密码重置令牌", Tags: []string{"Auth"},
+			Body: docs.Body{Required: true, Schema: controllers.ForgotPasswordRequest{}},
+		}},
+		{Method: "POST", Path: "/api/v1/reset-password", Handler: authCtrl.ResetPassword, Doc: docs.Op{
+			Summary: "使用令牌重置密码", Tags: []string{"Auth"},
+			Body: docs.Body{Required: true, Schema: controllers.ResetPasswordRequest{}},
+		}},
+
+		// ── 官网公开接口 ──
+		{Method: "GET", Path: "/api/v1/site/home", Handler: adminCtrl.PublicSiteHome, Doc: docs.Op{
+			Summary: "官网首页聚合数据", Tags: []string{"Site (Public)"},
+			Responses: []docs.Resp{{Schema: map[string]any{"type": "object", "properties": map[string]any{"home": docs.SchemaRef("SiteHome")}}}},
+		}},
+		{Method: "GET", Path: "/api/v1/site/resources/:slug", Handler: adminCtrl.PublicSiteResource, Doc: docs.Op{
+			Summary: "按 slug 或 ID 获取文章详情", Tags: []string{"Site (Public)"},
+			Params: []docs.Param{{Name: "slug", In: "path", Required: true, Description: "文章 slug 或数字 ID"}},
+			Responses: []docs.Resp{
+				{Schema: map[string]any{"type": "object", "properties": map[string]any{"resource": docs.SchemaRef("SiteResource")}}},
+				{Status: "404", Description: "文章不存在", Schema: respErr.Schema},
+			},
+		}},
+		{Method: "GET", Path: "/api/v1/site/search", Handler: adminCtrl.PublicSiteSearch, Doc: docs.Op{
+			Summary: "全文搜索已发布文章", Tags: []string{"Site (Public)"},
+			Description: "按标题 / 摘要 / 正文 / 标签 / 分类进行大小写不敏感的模糊匹配，命中标题权重最高。",
+			Params: []docs.Param{
+				{Name: "q", In: "query", Required: true, Description: "搜索关键词"},
+				{Name: "category", In: "query", Description: "限定分类"},
+				{Name: "tag", In: "query", Description: "限定单个标签"},
+				{Name: "page", In: "query", Type: "integer"},
+				{Name: "page_size", In: "query", Type: "integer"},
+			},
+			Responses: []docs.Resp{{Schema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"items":     map[string]any{"type": "array", "items": docs.SchemaRef("SiteResource")},
+					"total":     map[string]any{"type": "integer"},
+					"page":      map[string]any{"type": "integer"},
+					"page_size": map[string]any{"type": "integer"},
+					"query":     map[string]any{"type": "string"},
+				},
+			}}},
+		}},
+		{Method: "POST", Path: "/api/v1/site/knowledge", Handler: adminCtrl.PublicSiteKnowledge, Doc: docs.Op{
+			Summary: "官网知识库问答", Tags: []string{"Site (Public)"},
+			Body: docs.Body{Required: true, Schema: controllers.SiteKnowledgeRequest{}},
+		}},
+		{Method: "POST", Path: "/api/v1/site/messages", Handler: adminCtrl.PublicSiteMessage, Middleware: []gin.HandlerFunc{messageLimit}, Doc: docs.Op{
+			Summary: "提交访客留言", Tags: []string{"Site (Public)"},
+			Body: docs.Body{Required: true, Schema: controllers.SiteMessageRequest{}},
+		}},
+		{Method: "POST", Path: "/api/v1/site/visit", Handler: adminCtrl.PublicSiteVisit, Doc: docs.Op{
+			Summary: "上报访问统计", Tags: []string{"Site (Public)"},
+			Body: docs.Body{Schema: controllers.SiteVisitRequest{}},
+			Responses: []docs.Resp{{Status: "204", Description: "已记录"}},
+		}},
+		{Method: "GET", Path: "/api/v1/chat/ws", Handler: chatCtrl.WebSocket, Doc: docs.Op{
+			Summary: "聊天 WebSocket 入口", Tags: []string{"Chat"},
+			Description: "通过 URL 参数 `token=<access_token>` 传递 JWT。协议升级到 WebSocket 后不再走 HTTP。",
+			Params: []docs.Param{{Name: "token", In: "query", Required: true, Description: "Bearer 访问令牌"}},
+			Responses: []docs.Resp{{Status: "101", Description: "Switching Protocols"}},
+		}},
+
+		// ── 已登录：Me / 聊天 ──
+		{Method: "GET", Path: "/api/v1/me", Handler: authCtrl.Me, Auth: true, Doc: docs.Op{
+			Summary: "获取当前登录用户", Tags: []string{"Auth"},
+			Responses: []docs.Resp{{Schema: map[string]any{"type": "object", "properties": map[string]any{"user": docs.SchemaRef("User")}}}},
+		}},
+		{Method: "PUT", Path: "/api/v1/me", Handler: authCtrl.UpdateProfile, Auth: true, Doc: docs.Op{
+			Summary: "更新当前用户资料", Tags: []string{"Profile"},
+			Body: docs.Body{Required: true, Schema: controllers.UpdateProfileRequest{}},
+		}},
+		{Method: "PUT", Path: "/api/v1/me/password", Handler: authCtrl.ChangeMyPassword, Auth: true, Middleware: []gin.HandlerFunc{passwordLimit}, Doc: docs.Op{
+			Summary: "修改当前用户密码", Tags: []string{"Profile"},
+			Description: "旧密码与新密码都必须先经 RSA-OAEP-SHA256 加密。",
+			Body: docs.Body{Required: true, Schema: controllers.ChangePasswordRequest{}},
+		}},
+		{Method: "POST", Path: "/api/v1/me/avatar", Handler: authCtrl.UploadAvatar, Auth: true, Middleware: []gin.HandlerFunc{avatarLimit}, Doc: docs.Op{
+			Summary: "上传头像", Tags: []string{"Profile"},
+			Description: "`multipart/form-data`，字段名 `file`，允许 jpg/png/webp/gif，最大 5 MB。",
+			Responses: []docs.Resp{{Schema: map[string]any{"type": "object", "properties": map[string]any{"avatar_url": map[string]any{"type": "string"}}}}},
+		}},
+
+		{Method: "GET", Path: "/api/v1/chat/users", Handler: chatCtrl.ListUsers, Auth: true, Permission: "messages:chat", Doc: docs.Op{Summary: "聊天用户列表", Tags: []string{"Chat"}}},
+		{Method: "GET", Path: "/api/v1/chat/history/:id", Handler: chatCtrl.History, Auth: true, Permission: "messages:chat", Doc: docs.Op{Summary: "查询与指定用户的聊天历史", Tags: []string{"Chat"}, Params: []docs.Param{{Name: "id", In: "path", Type: "integer", Description: "对端用户 ID"}}}},
+		{Method: "POST", Path: "/api/v1/chat/upload", Handler: chatCtrl.Upload, Auth: true, Permission: "messages:chat", Doc: docs.Op{Summary: "上传聊天附件", Tags: []string{"Chat"}, Description: "multipart/form-data 字段 `file`"}},
+		{Method: "POST", Path: "/api/v1/chat/translate", Handler: chatCtrl.Translate, Auth: true, Permission: "messages:chat", Doc: docs.Op{Summary: "翻译聊天消息", Tags: []string{"Chat"}}},
+		{Method: "POST", Path: "/api/v1/chat/read/:id", Handler: chatCtrl.MarkRead, Auth: true, Permission: "messages:chat", Doc: docs.Op{Summary: "标记与该用户的消息为已读", Tags: []string{"Chat"}, Params: []docs.Param{{Name: "id", In: "path", Type: "integer"}}}},
+
+		// ── Admin：Dashboard ──
+		{Method: "GET", Path: "/api/v1/admin/dashboard", Handler: adminCtrl.Dashboard, Auth: true, Permission: "admin:access", Doc: docs.Op{Summary: "管理端仪表盘概览", Tags: []string{"Admin · Dashboard"}}},
+
+		// ── Admin：用户 ──
+		{Method: "GET", Path: "/api/v1/admin/users", Handler: adminCtrl.ListUsers, Auth: true, Permission: "users:read", Doc: docs.Op{Summary: "用户列表", Tags: []string{"Admin · Users"}, Params: pageQuery}},
+		{Method: "POST", Path: "/api/v1/admin/users", Handler: adminCtrl.CreateUser, Auth: true, Permission: "users:write", Doc: docs.Op{Summary: "创建用户", Tags: []string{"Admin · Users"}, Body: docs.Body{Required: true, Schema: controllers.CreateUserRequest{}}}},
+		{Method: "PUT", Path: "/api/v1/admin/users/:id", Handler: adminCtrl.UpdateUser, Auth: true, Permission: "users:write", Doc: docs.Op{Summary: "编辑用户", Tags: []string{"Admin · Users"}, Body: docs.Body{Required: true, Schema: controllers.UpdateUserRequest{}}}},
+		{Method: "PUT", Path: "/api/v1/admin/users/:id/roles", Handler: adminCtrl.SetUserRoles, Auth: true, Permission: "users:write", Doc: docs.Op{Summary: "分配用户角色", Tags: []string{"Admin · Users"}, Body: docs.Body{Required: true, Schema: controllers.SetUserRolesRequest{}}}},
+		{Method: "GET", Path: "/api/v1/admin/users/:id/password", Handler: adminCtrl.GetUserPassword, Auth: true, Permission: "users:password:read", Doc: docs.Op{Summary: "获取用户明文密码（密码保险箱）", Tags: []string{"Admin · Users"}}},
+		{Method: "PUT", Path: "/api/v1/admin/users/:id/password", Handler: adminCtrl.ResetUserPassword, Auth: true, Permission: "users:write", Doc: docs.Op{Summary: "重置用户密码", Tags: []string{"Admin · Users"}, Body: docs.Body{Required: true, Schema: controllers.ResetUserPasswordRequest{}}}},
+		{Method: "DELETE", Path: "/api/v1/admin/users/:id", Handler: adminCtrl.DeactivateUser, Auth: true, Permission: "users:write", Doc: docs.Op{Summary: "停用用户", Tags: []string{"Admin · Users"}}},
+
+		// ── Admin：角色 & 权限 ──
+		{Method: "GET", Path: "/api/v1/admin/roles", Handler: adminCtrl.ListRoles, Auth: true, Permission: "roles:read", Doc: docs.Op{Summary: "角色列表", Tags: []string{"Admin · Roles"}, Params: pageQuery}},
+		{Method: "POST", Path: "/api/v1/admin/roles", Handler: adminCtrl.CreateRole, Auth: true, Permission: "roles:write", Doc: docs.Op{Summary: "创建角色", Tags: []string{"Admin · Roles"}, Body: docs.Body{Required: true, Schema: controllers.RoleRequest{}}}},
+		{Method: "PUT", Path: "/api/v1/admin/roles/:id", Handler: adminCtrl.UpdateRole, Auth: true, Permission: "roles:write", Doc: docs.Op{Summary: "编辑角色", Tags: []string{"Admin · Roles"}, Body: docs.Body{Required: true, Schema: controllers.RoleRequest{}}}},
+		{Method: "DELETE", Path: "/api/v1/admin/roles/:id", Handler: adminCtrl.DeleteRole, Auth: true, Permission: "roles:write", Doc: docs.Op{Summary: "删除角色", Tags: []string{"Admin · Roles"}}},
+		{Method: "GET", Path: "/api/v1/admin/permissions", Handler: adminCtrl.ListPermissions, Auth: true, Permission: "permissions:read", Doc: docs.Op{Summary: "权限列表", Tags: []string{"Admin · Roles"}}},
+		{Method: "GET", Path: "/api/v1/admin/permissions/tree", Handler: adminCtrl.PermissionTree, Auth: true, Permission: "permissions:read", Doc: docs.Op{Summary: "权限树（菜单 + 按钮）", Tags: []string{"Admin · Roles"}}},
+		{Method: "GET", Path: "/api/v1/admin/roles/:id/preview", Handler: adminCtrl.RolePreview, Auth: true, Permission: "roles:read", Doc: docs.Op{Summary: "角色权限预览", Tags: []string{"Admin · Roles"}}},
+
+		// ── Admin：日志 & 通知 ──
+		{Method: "GET", Path: "/api/v1/admin/operation-logs", Handler: adminCtrl.ListOperationLogs, Auth: true, Permission: "logs:read", Doc: docs.Op{Summary: "操作日志分页", Tags: []string{"Admin · Logs"}, Params: pageQuery}},
+		{Method: "GET", Path: "/api/v1/admin/notifications", Handler: adminCtrl.ListNotifications, Auth: true, Permission: "notifications:read", Doc: docs.Op{Summary: "通知分页", Tags: []string{"Admin · Notifications"}, Params: append(pageQuery, docs.Param{Name: "read", In: "query", Description: "true/false 过滤已读状态"})}},
+		{Method: "GET", Path: "/api/v1/admin/notifications/unread-count", Handler: adminCtrl.UnreadNotificationCount, Auth: true, Permission: "notifications:read", Doc: docs.Op{Summary: "未读通知数", Tags: []string{"Admin · Notifications"}}},
+		{Method: "PUT", Path: "/api/v1/admin/notifications/:id/read", Handler: adminCtrl.MarkNotificationRead, Auth: true, Permission: "notifications:write", Doc: docs.Op{Summary: "标记单条已读", Tags: []string{"Admin · Notifications"}}},
+		{Method: "PUT", Path: "/api/v1/admin/notifications/read-all", Handler: adminCtrl.MarkAllNotificationsRead, Auth: true, Permission: "notifications:write", Doc: docs.Op{Summary: "全部标记已读", Tags: []string{"Admin · Notifications"}}},
+
+		// ── Admin：AI & 系统健康 ──
+		{Method: "POST", Path: "/api/v1/admin/ai/ask", Handler: adminCtrl.AskAssistant, Auth: true, Permission: "ai:assistant", Doc: docs.Op{Summary: "AI 助手提问", Tags: []string{"Admin · System"}, Body: docs.Body{Required: true, Schema: controllers.AskAssistantRequest{}}}},
+		{Method: "GET", Path: "/api/v1/admin/health", Handler: adminCtrl.SystemHealth, Auth: true, Permission: "health:read", Doc: docs.Op{Summary: "系统健康监控", Tags: []string{"Admin · System"}}},
+		{Method: "GET", Path: "/api/v1/admin/database/catalog", Handler: adminCtrl.DatabaseCatalog, Auth: true, Permission: "database:read", Doc: docs.Op{Summary: "数据库元信息 (catalog)", Tags: []string{"Admin · System"}}},
+		{Method: "GET", Path: "/api/v1/admin/database/tables", Handler: adminCtrl.ListDatabaseTables, Auth: true, Permission: "database:read", Doc: docs.Op{Summary: "数据库表列表", Tags: []string{"Admin · System"}}},
+		{Method: "GET", Path: "/api/v1/admin/database/tables/:table/columns", Handler: adminCtrl.ListDatabaseColumns, Auth: true, Permission: "database:read", Doc: docs.Op{Summary: "数据库表字段", Tags: []string{"Admin · System"}}},
+
+		// ── Admin：官网内容 ──
+		{Method: "GET", Path: "/api/v1/admin/site/announcements", Handler: adminCtrl.ListSiteAnnouncements, Auth: true, Permission: "site:read", Doc: docs.Op{Summary: "公告列表", Tags: []string{"Admin · Site"}, Params: pageQuery}},
+		{Method: "POST", Path: "/api/v1/admin/site/announcements", Handler: adminCtrl.CreateSiteAnnouncement, Auth: true, Permission: "site:write", Doc: docs.Op{Summary: "创建公告", Tags: []string{"Admin · Site"}, Body: docs.Body{Required: true, Schema: controllers.SiteAnnouncementRequest{}}}},
+		{Method: "PUT", Path: "/api/v1/admin/site/announcements/:id", Handler: adminCtrl.UpdateSiteAnnouncement, Auth: true, Permission: "site:write", Doc: docs.Op{Summary: "编辑公告", Tags: []string{"Admin · Site"}, Body: docs.Body{Required: true, Schema: controllers.SiteAnnouncementRequest{}}}},
+		{Method: "DELETE", Path: "/api/v1/admin/site/announcements/:id", Handler: adminCtrl.DeleteSiteAnnouncement, Auth: true, Permission: "site:write", Doc: docs.Op{Summary: "删除公告", Tags: []string{"Admin · Site"}}},
+
+		{Method: "GET", Path: "/api/v1/admin/site/banners", Handler: adminCtrl.ListSiteBanners, Auth: true, Permission: "site:read", Doc: docs.Op{Summary: "轮播列表", Tags: []string{"Admin · Site"}, Params: pageQuery}},
+		{Method: "POST", Path: "/api/v1/admin/site/banners", Handler: adminCtrl.CreateSiteBanner, Auth: true, Permission: "site:write", Doc: docs.Op{Summary: "创建轮播", Tags: []string{"Admin · Site"}, Body: docs.Body{Required: true, Schema: controllers.SiteBannerRequest{}}}},
+		{Method: "PUT", Path: "/api/v1/admin/site/banners/:id", Handler: adminCtrl.UpdateSiteBanner, Auth: true, Permission: "site:write", Doc: docs.Op{Summary: "编辑轮播", Tags: []string{"Admin · Site"}, Body: docs.Body{Required: true, Schema: controllers.SiteBannerRequest{}}}},
+		{Method: "DELETE", Path: "/api/v1/admin/site/banners/:id", Handler: adminCtrl.DeleteSiteBanner, Auth: true, Permission: "site:write", Doc: docs.Op{Summary: "删除轮播", Tags: []string{"Admin · Site"}}},
+
+		{Method: "GET", Path: "/api/v1/admin/site/resources", Handler: adminCtrl.ListSiteResources, Auth: true, Permission: "site:read", Doc: docs.Op{Summary: "资源列表", Tags: []string{"Admin · Site"}, Params: pageQuery}},
+		{Method: "POST", Path: "/api/v1/admin/site/resources", Handler: adminCtrl.SaveSiteResource, Auth: true, Permission: "site:write", Doc: docs.Op{Summary: "创建资源", Tags: []string{"Admin · Site"}, Body: docs.Body{Required: true, Schema: controllers.SiteResourceRequest{}}}},
+		{Method: "PUT", Path: "/api/v1/admin/site/resources/:id", Handler: adminCtrl.SaveSiteResource, Auth: true, Permission: "site:write", Doc: docs.Op{Summary: "编辑资源", Tags: []string{"Admin · Site"}, Body: docs.Body{Required: true, Schema: controllers.SiteResourceRequest{}}}},
+		{Method: "DELETE", Path: "/api/v1/admin/site/resources/:id", Handler: adminCtrl.DeleteSiteResource, Auth: true, Permission: "site:write", Doc: docs.Op{Summary: "删除资源", Tags: []string{"Admin · Site"}}},
+
+		{Method: "GET", Path: "/api/v1/admin/site/tech-stacks", Handler: adminCtrl.ListSiteTechStacks, Auth: true, Permission: "site:read", Doc: docs.Op{Summary: "技术栈列表", Tags: []string{"Admin · Site"}, Params: pageQuery}},
+		{Method: "POST", Path: "/api/v1/admin/site/tech-stacks", Handler: adminCtrl.SaveSiteTechStack, Auth: true, Permission: "site:write", Doc: docs.Op{Summary: "创建技术栈", Tags: []string{"Admin · Site"}, Body: docs.Body{Required: true, Schema: controllers.SiteTechStackRequest{}}}},
+		{Method: "PUT", Path: "/api/v1/admin/site/tech-stacks/:id", Handler: adminCtrl.SaveSiteTechStack, Auth: true, Permission: "site:write", Doc: docs.Op{Summary: "编辑技术栈", Tags: []string{"Admin · Site"}, Body: docs.Body{Required: true, Schema: controllers.SiteTechStackRequest{}}}},
+		{Method: "DELETE", Path: "/api/v1/admin/site/tech-stacks/:id", Handler: adminCtrl.DeleteSiteTechStack, Auth: true, Permission: "site:write", Doc: docs.Op{Summary: "删除技术栈", Tags: []string{"Admin · Site"}}},
+
+		{Method: "GET", Path: "/api/v1/admin/site/projects", Handler: adminCtrl.ListSiteProjects, Auth: true, Permission: "site:read", Doc: docs.Op{Summary: "项目列表", Tags: []string{"Admin · Site"}, Params: pageQuery}},
+		{Method: "POST", Path: "/api/v1/admin/site/projects", Handler: adminCtrl.SaveSiteProject, Auth: true, Permission: "site:write", Doc: docs.Op{Summary: "创建项目", Tags: []string{"Admin · Site"}, Body: docs.Body{Required: true, Schema: controllers.SiteProjectRequest{}}}},
+		{Method: "PUT", Path: "/api/v1/admin/site/projects/:id", Handler: adminCtrl.SaveSiteProject, Auth: true, Permission: "site:write", Doc: docs.Op{Summary: "编辑项目", Tags: []string{"Admin · Site"}, Body: docs.Body{Required: true, Schema: controllers.SiteProjectRequest{}}}},
+		{Method: "DELETE", Path: "/api/v1/admin/site/projects/:id", Handler: adminCtrl.DeleteSiteProject, Auth: true, Permission: "site:write", Doc: docs.Op{Summary: "删除项目", Tags: []string{"Admin · Site"}}},
+
+		{Method: "GET", Path: "/api/v1/admin/site/timeline", Handler: adminCtrl.ListSiteTimelineEvents, Auth: true, Permission: "site:read", Doc: docs.Op{Summary: "时间轴列表", Tags: []string{"Admin · Site"}, Params: pageQuery}},
+		{Method: "POST", Path: "/api/v1/admin/site/timeline", Handler: adminCtrl.SaveSiteTimelineEvent, Auth: true, Permission: "site:write", Doc: docs.Op{Summary: "创建时间轴事件", Tags: []string{"Admin · Site"}, Body: docs.Body{Required: true, Schema: controllers.SiteTimelineEventRequest{}}}},
+		{Method: "PUT", Path: "/api/v1/admin/site/timeline/:id", Handler: adminCtrl.SaveSiteTimelineEvent, Auth: true, Permission: "site:write", Doc: docs.Op{Summary: "编辑时间轴事件", Tags: []string{"Admin · Site"}, Body: docs.Body{Required: true, Schema: controllers.SiteTimelineEventRequest{}}}},
+		{Method: "DELETE", Path: "/api/v1/admin/site/timeline/:id", Handler: adminCtrl.DeleteSiteTimelineEvent, Auth: true, Permission: "site:write", Doc: docs.Op{Summary: "删除时间轴事件", Tags: []string{"Admin · Site"}}},
+
+		{Method: "GET", Path: "/api/v1/admin/site/messages", Handler: adminCtrl.ListSiteMessages, Auth: true, Permission: "site:read", Doc: docs.Op{Summary: "留言列表", Tags: []string{"Admin · Site"}, Params: pageQuery}},
+		{Method: "PUT", Path: "/api/v1/admin/site/messages/:id", Handler: adminCtrl.SaveSiteMessage, Auth: true, Permission: "site:write", Doc: docs.Op{Summary: "回复/审核留言", Tags: []string{"Admin · Site"}, Body: docs.Body{Required: true, Schema: controllers.SiteMessageRequest{}}}},
+		{Method: "DELETE", Path: "/api/v1/admin/site/messages/:id", Handler: adminCtrl.DeleteSiteMessage, Auth: true, Permission: "site:write", Doc: docs.Op{Summary: "删除留言", Tags: []string{"Admin · Site"}}},
+
+		{Method: "GET", Path: "/api/v1/admin/site/analytics", Handler: adminCtrl.SiteAnalytics, Auth: true, Permission: "site:read", Doc: docs.Op{Summary: "官网访问数据分析", Tags: []string{"Admin · Site"}}},
+		{Method: "POST", Path: "/api/v1/admin/site/upload", Handler: adminCtrl.UploadSiteAsset, Auth: true, Permission: "site:write", Doc: docs.Op{Summary: "上传官网素材", Tags: []string{"Admin · Site"}}},
+	}
+
+	return specs
+}
+
+func pingHandler() gin.HandlerFunc {
+	return func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"message": "pong"}) }
+}
+
+// extractAccountKey 从登录请求 body 中读取 account/email 作为限流维度键。
+// 使用 ShouldBindBodyWith 让后续 handler 依然能读到 body。
+func extractAccountKey(c *gin.Context) string {
+	var body struct {
+		Account string `json:"account"`
+		Email   string `json:"email"`
+	}
+	// Gin 1.10 提供 ShouldBindBodyWith，缓存原始 body 供后续 ShouldBindJSON 使用
+	if err := c.ShouldBindBodyWithJSON(&body); err != nil {
+		return ""
+	}
+	if body.Account != "" {
+		return body.Account
+	}
+	return body.Email
 }

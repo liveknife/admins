@@ -1,4 +1,4 @@
-﻿import { http } from "@/utils/http";
+import { http } from "@/utils/http";
 import { encryptPassword } from "@/utils/passwordCrypto";
 
 export type GoUser = {
@@ -6,6 +6,7 @@ export type GoUser = {
   username: string;
   email: string;
   phone: string;
+  avatar_url?: string;
   roles: string[];
   permissions: string[];
   created_at: string;
@@ -52,19 +53,24 @@ export type MeResult = {
   data: GoUser;
 };
 
+export type CaptchaChallenge = {
+  captcha_id: string;
+  image: string;
+  expires_in: number;
+};
+
 const toExpiresDate = (expiresInSeconds: number) => {
   return new Date(Date.now() + expiresInSeconds * 1000);
 };
 
 const normalizeAuthResponse = (response: GoAuthResponse): UserResult => {
   const { user, tokens } = response;
-
   return {
     success: true,
     data: {
       id: user.id,
       email: user.email,
-      avatar: "",
+      avatar: user.avatar_url ?? "",
       username: user.username,
       nickname: user.username,
       roles: user.roles ?? [],
@@ -76,17 +82,26 @@ const normalizeAuthResponse = (response: GoAuthResponse): UserResult => {
   };
 };
 
+/** 图形验证码 */
+export const fetchCaptcha = () => {
+  return http.request<CaptchaChallenge>("get", "/api/v1/captcha");
+};
+
 export const getLogin = async (data?: {
   account?: string;
   email?: string;
   password?: string;
+  captcha?: string;
+  captcha_id?: string;
 }) => {
   const passwordEncrypted = await encryptPassword(data?.password ?? "");
   return http
     .request<GoAuthResponse>("post", "/api/v1/login", {
       data: {
         account: data?.account ?? data?.email,
-        password_encrypted: passwordEncrypted
+        password_encrypted: passwordEncrypted,
+        captcha: data?.captcha,
+        captcha_id: data?.captcha_id
       }
     })
     .then(normalizeAuthResponse);
@@ -105,6 +120,8 @@ export const registerApi = async (data?: {
   email?: string;
   phone?: string;
   password?: string;
+  captcha?: string;
+  captcha_id?: string;
 }) => {
   const passwordEncrypted = await encryptPassword(data?.password ?? "");
   return http.request<GoUserResponse>("post", "/api/v1/register", {
@@ -112,12 +129,18 @@ export const registerApi = async (data?: {
       username: data?.username,
       email: data?.email,
       phone: data?.phone,
-      password_encrypted: passwordEncrypted
+      password_encrypted: passwordEncrypted,
+      captcha: data?.captcha,
+      captcha_id: data?.captcha_id
     }
   });
 };
 
-export const forgotPasswordApi = (data?: { email?: string }) => {
+export const forgotPasswordApi = (data?: {
+  email?: string;
+  captcha?: string;
+  captcha_id?: string;
+}) => {
   return http.request<{ message: string; reset_token: string }>(
     "post",
     "/api/v1/forgot-password",
@@ -143,4 +166,41 @@ export const getMe = () => {
     success: true,
     data: response.user
   }));
+};
+
+/** 个人中心：更新资料 */
+export const updateProfileApi = (data: {
+  username: string;
+  email: string;
+  phone?: string;
+  avatar_url?: string;
+}) => {
+  return http.request<GoUserResponse>("put", "/api/v1/me", { data });
+};
+
+/** 个人中心：修改密码（旧密码 + 新密码都 RSA 加密） */
+export const changeMyPasswordApi = async (data: {
+  old_password: string;
+  new_password: string;
+}) => {
+  const [oldEnc, newEnc] = await Promise.all([
+    encryptPassword(data.old_password),
+    encryptPassword(data.new_password)
+  ]);
+  return http.request<{ message: string }>("put", "/api/v1/me/password", {
+    data: {
+      old_password_encrypted: oldEnc,
+      new_password_encrypted: newEnc
+    }
+  });
+};
+
+/** 个人中心：上传头像（axios 会自动补 multipart 边界） */
+export const uploadAvatarApi = (file: File) => {
+  const form = new FormData();
+  form.append("file", file);
+  return http.request<{ avatar_url: string }>("post", "/api/v1/me/avatar", {
+    data: form,
+    headers: { "Content-Type": "multipart/form-data" }
+  });
 };

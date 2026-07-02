@@ -29,7 +29,8 @@ const useLoginRules = () => {
     password: [
       { required: true, message: t("login.passwordRequired"), trigger: "blur" },
       { min: 6, message: t("login.passwordMin"), trigger: "blur" }
-    ]
+    ],
+    captcha: [{ required: true, message: "请输入图形验证码", trigger: "blur" }]
   }));
 };
 

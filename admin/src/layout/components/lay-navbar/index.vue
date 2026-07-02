@@ -10,7 +10,9 @@ import LaySidebarTopCollapse from "../lay-sidebar/components/SidebarTopCollapse.
 import { useI18n } from "@/i18n";
 
 import LogoutCircleRLine from "~icons/ri/logout-circle-r-line";
+import UserSettings from "~icons/ri/user-settings-line";
 import Setting from "~icons/ri/settings-3-line";
+import { useRouter } from "vue-router";
 
 const {
   layout,
@@ -24,6 +26,7 @@ const {
   toggleSideBar
 } = useNav();
 const { t } = useI18n();
+const router = useRouter();
 </script>
 
 <template>
@@ -58,6 +61,10 @@ const { t } = useI18n();
         </span>
         <template #dropdown>
           <el-dropdown-menu class="logout">
+            <el-dropdown-item @click="router.push('/profile')">
+              <IconifyIconOffline :icon="UserSettings" style="margin: 5px" />
+              个人中心
+            </el-dropdown-item>
             <el-dropdown-item @click="logout">
               <IconifyIconOffline
                 :icon="LogoutCircleRLine"

@@ -29,21 +29,21 @@ func NewAdminController(authService *services.AuthService, adminData *services.A
 // 请求体
 // ──────────────────────────────────────────────
 
-type roleRequest struct {
+type RoleRequest struct {
 	Name        string   `json:"name" form:"name" binding:"required,min=2,max=50"`
 	Description string   `json:"description" form:"description"`
 	Permissions []string `json:"permissions" form:"permissions"`
 }
 
-type resetUserPasswordRequest struct {
+type ResetUserPasswordRequest struct {
 	PasswordEncrypted string `json:"password_encrypted" form:"password_encrypted" binding:"required"`
 }
 
-type setUserRolesRequest struct {
+type SetUserRolesRequest struct {
 	Roles []string `json:"roles" form:"roles" binding:"required"`
 }
 
-type createUserRequest struct {
+type CreateUserRequest struct {
 	Username          string   `json:"username" form:"username" binding:"required,min=2,max=50"`
 	Email             string   `json:"email" form:"email" binding:"required,email"`
 	Phone             string   `json:"phone" form:"phone"`
@@ -51,38 +51,38 @@ type createUserRequest struct {
 	Roles             []string `json:"roles" form:"roles"`
 }
 
-type updateUserRequest struct {
+type UpdateUserRequest struct {
 	Username string `json:"username" form:"username" binding:"required,min=2,max=50"`
 	Email    string `json:"email" form:"email" binding:"required,email"`
 	Phone    string `json:"phone" form:"phone"`
 }
 
-type askAssistantRequest struct {
+type AskAssistantRequest struct {
 	Question string `json:"question" form:"question"`
 }
 
-type siteKnowledgeRequest struct {
+type SiteKnowledgeRequest struct {
 	Question string `json:"question" form:"question"`
 }
 
-type siteVisitRequest struct {
+type SiteVisitRequest struct {
 	Path     string `json:"path" form:"path"`
 	Referrer string `json:"referrer" form:"referrer"`
 	Device   string `json:"device" form:"device"`
 }
 
-type databaseTablesQuery struct {
+type DatabaseTablesQuery struct {
 	Database string `form:"database"`
 	Table    string `form:"table"`
 	Engine   string `form:"engine"`
 	Comment  string `form:"comment"`
 }
 
-type siteListQuery struct {
+type SiteListQuery struct {
 	Status string `form:"status"`
 }
 
-type siteAnnouncementRequest struct {
+type SiteAnnouncementRequest struct {
 	Title     string     `json:"title" form:"title" binding:"required"`
 	Content   string     `json:"content" form:"content"`
 	LinkURL   string     `json:"link_url" form:"link_url"`
@@ -92,7 +92,7 @@ type siteAnnouncementRequest struct {
 	EndsAt    *time.Time `json:"ends_at" form:"ends_at"`
 }
 
-type siteBannerRequest struct {
+type SiteBannerRequest struct {
 	Title     string `json:"title" form:"title" binding:"required"`
 	Subtitle  string `json:"subtitle" form:"subtitle"`
 	ImageURL  string `json:"image_url" form:"image_url"`
@@ -101,7 +101,7 @@ type siteBannerRequest struct {
 	SortOrder int    `json:"sort_order" form:"sort_order"`
 }
 
-type siteResourceRequest struct {
+type SiteResourceRequest struct {
 	Title           string     `json:"title" form:"title" binding:"required"`
 	Slug            string     `json:"slug" form:"slug"`
 	Summary         string     `json:"summary" form:"summary"`
@@ -120,7 +120,7 @@ type siteResourceRequest struct {
 	PublishedAt     *time.Time `json:"published_at" form:"published_at"`
 }
 
-type siteTechStackRequest struct {
+type SiteTechStackRequest struct {
 	Name        string `json:"name" form:"name" binding:"required"`
 	Category    string `json:"category" form:"category"`
 	Level       int    `json:"level" form:"level"`
@@ -130,7 +130,7 @@ type siteTechStackRequest struct {
 	SortOrder   int    `json:"sort_order" form:"sort_order"`
 }
 
-type siteProjectRequest struct {
+type SiteProjectRequest struct {
 	Name        string     `json:"name" form:"name" binding:"required"`
 	Summary     string     `json:"summary" form:"summary"`
 	Description string     `json:"description" form:"description"`
@@ -144,7 +144,7 @@ type siteProjectRequest struct {
 	PublishedAt *time.Time `json:"published_at" form:"published_at"`
 }
 
-type siteTimelineEventRequest struct {
+type SiteTimelineEventRequest struct {
 	Title       string     `json:"title" form:"title" binding:"required"`
 	Summary     string     `json:"summary" form:"summary"`
 	Content     string     `json:"content" form:"content"`
@@ -159,7 +159,7 @@ type siteTimelineEventRequest struct {
 	PublishedAt *time.Time `json:"published_at" form:"published_at"`
 }
 
-type siteMessageRequest struct {
+type SiteMessageRequest struct {
 	VisitorName string `json:"visitor_name" form:"visitor_name"`
 	Email       string `json:"email" form:"email"`
 	Content     string `json:"content" form:"content" binding:"required"`
@@ -168,7 +168,7 @@ type siteMessageRequest struct {
 	IsPublic    bool   `json:"is_public" form:"is_public"`
 }
 
-func siteAnnouncementInput(req siteAnnouncementRequest) services.SiteAnnouncementInput {
+func siteAnnouncementInput(req SiteAnnouncementRequest) services.SiteAnnouncementInput {
 	return services.SiteAnnouncementInput{
 		Title:     strings.TrimSpace(req.Title),
 		Content:   strings.TrimSpace(req.Content),
@@ -180,7 +180,7 @@ func siteAnnouncementInput(req siteAnnouncementRequest) services.SiteAnnouncemen
 	}
 }
 
-func siteBannerInput(req siteBannerRequest) services.SiteBannerInput {
+func siteBannerInput(req SiteBannerRequest) services.SiteBannerInput {
 	return services.SiteBannerInput{
 		Title:     strings.TrimSpace(req.Title),
 		Subtitle:  strings.TrimSpace(req.Subtitle),
@@ -191,7 +191,7 @@ func siteBannerInput(req siteBannerRequest) services.SiteBannerInput {
 	}
 }
 
-func siteResourceInput(req siteResourceRequest) services.SiteResourceInput {
+func siteResourceInput(req SiteResourceRequest) services.SiteResourceInput {
 	return services.SiteResourceInput{
 		Title:           strings.TrimSpace(req.Title),
 		Slug:            strings.TrimSpace(req.Slug),
@@ -212,7 +212,7 @@ func siteResourceInput(req siteResourceRequest) services.SiteResourceInput {
 	}
 }
 
-func siteTechStackInput(req siteTechStackRequest) services.SiteTechStackInput {
+func siteTechStackInput(req SiteTechStackRequest) services.SiteTechStackInput {
 	return services.SiteTechStackInput{
 		Name:        strings.TrimSpace(req.Name),
 		Category:    strings.TrimSpace(req.Category),
@@ -224,7 +224,7 @@ func siteTechStackInput(req siteTechStackRequest) services.SiteTechStackInput {
 	}
 }
 
-func siteProjectInput(req siteProjectRequest) services.SiteProjectInput {
+func siteProjectInput(req SiteProjectRequest) services.SiteProjectInput {
 	return services.SiteProjectInput{
 		Name:        strings.TrimSpace(req.Name),
 		Summary:     strings.TrimSpace(req.Summary),
@@ -240,7 +240,7 @@ func siteProjectInput(req siteProjectRequest) services.SiteProjectInput {
 	}
 }
 
-func siteTimelineEventInput(req siteTimelineEventRequest) services.SiteTimelineEventInput {
+func siteTimelineEventInput(req SiteTimelineEventRequest) services.SiteTimelineEventInput {
 	return services.SiteTimelineEventInput{
 		Title:       strings.TrimSpace(req.Title),
 		Summary:     strings.TrimSpace(req.Summary),
@@ -257,7 +257,7 @@ func siteTimelineEventInput(req siteTimelineEventRequest) services.SiteTimelineE
 	}
 }
 
-func siteMessageInput(req siteMessageRequest, g *gin.Context) services.SiteMessageInput {
+func siteMessageInput(req SiteMessageRequest, g *gin.Context) services.SiteMessageInput {
 	return services.SiteMessageInput{
 		VisitorName: strings.TrimSpace(req.VisitorName),
 		Email:       strings.TrimSpace(req.Email),
@@ -289,7 +289,7 @@ func (c *AdminController) SetUserRoles(g *gin.Context) {
 	if !ok {
 		return
 	}
-	var req setUserRolesRequest
+	var req SetUserRolesRequest
 	if err := bindRequest(g, &req); err != nil {
 		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -329,7 +329,7 @@ func (c *AdminController) ResetUserPassword(g *gin.Context) {
 	if !ok {
 		return
 	}
-	var req resetUserPasswordRequest
+	var req ResetUserPasswordRequest
 	if err := bindRequest(g, &req); err != nil {
 		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -380,7 +380,7 @@ func (c *AdminController) DeactivateUser(g *gin.Context) {
 }
 
 func (c *AdminController) CreateUser(g *gin.Context) {
-	var req createUserRequest
+	var req CreateUserRequest
 	if err := bindRequest(g, &req); err != nil {
 		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -412,7 +412,7 @@ func (c *AdminController) UpdateUser(g *gin.Context) {
 	if !ok {
 		return
 	}
-	var req updateUserRequest
+	var req UpdateUserRequest
 	if err := bindRequest(g, &req); err != nil {
 		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -449,7 +449,7 @@ func (c *AdminController) ListRoles(g *gin.Context) {
 }
 
 func (c *AdminController) CreateRole(g *gin.Context) {
-	var req roleRequest
+	var req RoleRequest
 	if err := bindRequest(g, &req); err != nil {
 		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -480,7 +480,7 @@ func (c *AdminController) UpdateRole(g *gin.Context) {
 	if !ok {
 		return
 	}
-	var req roleRequest
+	var req RoleRequest
 	if err := bindRequest(g, &req); err != nil {
 		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -624,7 +624,7 @@ func (c *AdminController) MarkAllNotificationsRead(g *gin.Context) {
 }
 
 func (c *AdminController) AskAssistant(g *gin.Context) {
-	var req askAssistantRequest
+	var req AskAssistantRequest
 	if err := bindRequest(g, &req); err != nil {
 		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -651,7 +651,7 @@ func (c *AdminController) DatabaseCatalog(g *gin.Context) {
 }
 
 func (c *AdminController) ListDatabaseTables(g *gin.Context) {
-	var req databaseTablesQuery
+	var req DatabaseTablesQuery
 	if err := g.ShouldBindQuery(&req); err != nil {
 		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -693,8 +693,30 @@ func (c *AdminController) PublicSiteResource(g *gin.Context) {
 	g.JSON(http.StatusOK, gin.H{"resource": item})
 }
 
+// PublicSiteSearch 全文搜索已发布文章
+func (c *AdminController) PublicSiteSearch(g *gin.Context) {
+	query := strings.TrimSpace(g.Query("q"))
+	if query == "" {
+		g.JSON(http.StatusOK, gin.H{
+			"items": []any{}, "total": 0, "page": 1, "page_size": 10, "query": "",
+		})
+		return
+	}
+	page, pageSize := parsePaginationQuery(g)
+	items, total, err := c.adminData.SearchSiteResources(
+		g.Request.Context(), query, g.Query("category"), g.Query("tag"), page, pageSize,
+	)
+	if err != nil {
+		respondError(g, http.StatusInternalServerError, "search failed")
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{
+		"items": items, "total": total, "page": page, "page_size": pageSize, "query": query,
+	})
+}
+
 func (c *AdminController) PublicSiteKnowledge(g *gin.Context) {
-	var req siteKnowledgeRequest
+	var req SiteKnowledgeRequest
 	if err := bindRequest(g, &req); err != nil {
 		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -708,7 +730,7 @@ func (c *AdminController) PublicSiteKnowledge(g *gin.Context) {
 }
 
 func (c *AdminController) PublicSiteMessage(g *gin.Context) {
-	var req siteMessageRequest
+	var req SiteMessageRequest
 	if err := bindRequest(g, &req); err != nil {
 		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -722,7 +744,7 @@ func (c *AdminController) PublicSiteMessage(g *gin.Context) {
 }
 
 func (c *AdminController) PublicSiteVisit(g *gin.Context) {
-	var req siteVisitRequest
+	var req SiteVisitRequest
 	if err := bindRequest(g, &req); err != nil {
 		g.Status(http.StatusNoContent)
 		return
@@ -748,7 +770,7 @@ func (c *AdminController) ListSiteAnnouncements(g *gin.Context) {
 }
 
 func (c *AdminController) CreateSiteAnnouncement(g *gin.Context) {
-	var req siteAnnouncementRequest
+	var req SiteAnnouncementRequest
 	if err := bindRequest(g, &req); err != nil {
 		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -767,7 +789,7 @@ func (c *AdminController) UpdateSiteAnnouncement(g *gin.Context) {
 	if !ok {
 		return
 	}
-	var req siteAnnouncementRequest
+	var req SiteAnnouncementRequest
 	if err := bindRequest(g, &req); err != nil {
 		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -805,7 +827,7 @@ func (c *AdminController) ListSiteBanners(g *gin.Context) {
 }
 
 func (c *AdminController) CreateSiteBanner(g *gin.Context) {
-	var req siteBannerRequest
+	var req SiteBannerRequest
 	if err := bindRequest(g, &req); err != nil {
 		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -824,7 +846,7 @@ func (c *AdminController) UpdateSiteBanner(g *gin.Context) {
 	if !ok {
 		return
 	}
-	var req siteBannerRequest
+	var req SiteBannerRequest
 	if err := bindRequest(g, &req); err != nil {
 		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -870,7 +892,7 @@ func (c *AdminController) SaveSiteResource(g *gin.Context) {
 		}
 		id = parsed
 	}
-	var req siteResourceRequest
+	var req SiteResourceRequest
 	if err := bindRequest(g, &req); err != nil {
 		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -916,7 +938,7 @@ func (c *AdminController) SaveSiteTechStack(g *gin.Context) {
 		}
 		id = parsed
 	}
-	var req siteTechStackRequest
+	var req SiteTechStackRequest
 	if err := bindRequest(g, &req); err != nil {
 		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -962,7 +984,7 @@ func (c *AdminController) SaveSiteProject(g *gin.Context) {
 		}
 		id = parsed
 	}
-	var req siteProjectRequest
+	var req SiteProjectRequest
 	if err := bindRequest(g, &req); err != nil {
 		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -1008,7 +1030,7 @@ func (c *AdminController) SaveSiteTimelineEvent(g *gin.Context) {
 		}
 		id = parsed
 	}
-	var req siteTimelineEventRequest
+	var req SiteTimelineEventRequest
 	if err := bindRequest(g, &req); err != nil {
 		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -1050,7 +1072,7 @@ func (c *AdminController) SaveSiteMessage(g *gin.Context) {
 	if !ok {
 		return
 	}
-	var req siteMessageRequest
+	var req SiteMessageRequest
 	if err := bindRequest(g, &req); err != nil {
 		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

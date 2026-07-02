@@ -5,6 +5,7 @@ import { message } from "@/utils/message";
 import { useLoginRules } from "./utils/rule";
 import { onBeforeUnmount, onMounted, reactive, ref, toRaw } from "vue";
 import { registerApi } from "@/api/user";
+import { fetchCaptcha, type CaptchaChallenge } from "@/api/user";
 import { debounce } from "@pureadmin/utils";
 import { useNav } from "@/layout/hooks/useNav";
 import { useEventListener } from "@vueuse/core";
@@ -60,8 +61,29 @@ const ruleForm = reactive({
   username: "",
   phone: "",
   email: "",
-  password: ""
+  password: "",
+  captcha: ""
 });
+
+// 图形验证码状态
+const captchaImage = ref("");
+const captchaId = ref("");
+const captchaLoading = ref(false);
+
+const refreshCaptcha = async () => {
+  captchaLoading.value = true;
+  try {
+    const data = (await fetchCaptcha()) as CaptchaChallenge;
+    captchaImage.value = data.image;
+    captchaId.value = data.captcha_id;
+    ruleForm.captcha = "";
+  } catch {
+    captchaImage.value = "";
+    captchaId.value = "";
+  } finally {
+    captchaLoading.value = false;
+  }
+};
 
 const toggleMode = () => {
   authMode.value = authMode.value === "login" ? "register" : "login";
@@ -76,7 +98,9 @@ const onLogin = async (formEl: FormInstance | undefined) => {
       useUserStoreHook()
         .loginByUsername({
           account: ruleForm.account,
-          password: ruleForm.password
+          password: ruleForm.password,
+          captcha: ruleForm.captcha,
+          captcha_id: captchaId.value
         })
         .then(res => {
           if (res.success) {
@@ -91,9 +115,11 @@ const onLogin = async (formEl: FormInstance | undefined) => {
             });
           }
           message(t("login.loginFailed"), { type: "error" });
+          refreshCaptcha();
         })
         .catch(() => {
           message(t("login.loginFailed"), { type: "error" });
+          refreshCaptcha();
         })
         .finally(() => (loading.value = false));
     }
@@ -110,16 +136,20 @@ const onRegister = async (formEl: FormInstance | undefined) => {
         username: ruleForm.username,
         email: ruleForm.email,
         phone: ruleForm.phone,
-        password: ruleForm.password
+        password: ruleForm.password,
+        captcha: ruleForm.captcha,
+        captcha_id: captchaId.value
       });
       ruleForm.account = ruleForm.username;
       authMode.value = "login";
       message(t("login.registerSuccess"), { type: "success" });
       ruleFormRef.value?.clearValidate();
+      refreshCaptcha();
     } catch (error) {
       message(t("login.registerFailed"), {
         type: "error"
       });
+      refreshCaptcha();
     } finally {
       loading.value = false;
     }
@@ -228,7 +258,10 @@ const initParticles = () => {
   draw();
 };
 
-onMounted(initParticles);
+onMounted(() => {
+  initParticles();
+  refreshCaptcha();
+});
 
 onBeforeUnmount(() => {
   cancelAnimationFrame(animationFrame);
@@ -328,6 +361,29 @@ onBeforeUnmount(() => {
               </el-form-item>
             </Motion>
 
+            <Motion :delay="authMode === 'login' ? 175 : 200">
+              <el-form-item prop="captcha">
+                <div class="captcha-row">
+                  <el-input
+                    v-model="ruleForm.captcha"
+                    clearable
+                    maxlength="6"
+                    placeholder="请输入右侧图形验证码"
+                  />
+                  <button
+                    type="button"
+                    class="captcha-image"
+                    :aria-label="'刷新验证码'"
+                    :disabled="captchaLoading"
+                    @click="refreshCaptcha"
+                  >
+                    <img v-if="captchaImage" :src="captchaImage" alt="captcha" />
+                    <span v-else>加载中</span>
+                  </button>
+                </div>
+              </el-form-item>
+            </Motion>
+
             <Motion :delay="250">
               <el-button
                 class="w-full mt-4!"
@@ -414,5 +470,52 @@ onBeforeUnmount(() => {
 
 .auth-switch:hover {
   color: #60a5fa;
+}
+
+.captcha-row {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  align-items: stretch;
+}
+
+.captcha-row :deep(.el-input) {
+  flex: 1;
+  min-width: 0;
+}
+
+.captcha-image {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 120px;
+  padding: 0;
+  overflow: hidden;
+  cursor: pointer;
+  background: #0f172a;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 6px;
+  transition: border-color 0.2s;
+}
+
+.captcha-image:hover {
+  border-color: #38bdf8;
+}
+
+.captcha-image[disabled] {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.captcha-image img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.captcha-image span {
+  font-size: 12px;
+  color: #94a3b8;
 }
 </style>

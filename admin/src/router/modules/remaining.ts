@@ -10,6 +10,21 @@ export default [
       showLink: false
     }
   },
+  // 个人中心（不在菜单中显示，从右上角下拉进入）
+  {
+    path: "/profile",
+    component: Layout,
+    redirect: "/profile/index",
+    meta: { title: "个人中心", showLink: false },
+    children: [
+      {
+        path: "/profile/index",
+        name: "Profile",
+        component: () => import("@/views/profile/index.vue"),
+        meta: { title: "个人中心", showLink: false }
+      }
+    ]
+  },
   // 全屏403（无权访问）页面
   {
     path: "/access-denied",

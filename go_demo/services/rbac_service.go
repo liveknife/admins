@@ -20,7 +20,7 @@ import (
 
 // ListUsers 列出所有用户
 func (s *AuthService) ListUsers(ctx context.Context) ([]models.User, error) {
-	rows, err := database.QueryCtx(ctx, s.db, `SELECT id,username,email,phone,created_at,deleted_at FROM users ORDER BY id ASC`)
+	rows, err := database.QueryCtx(ctx, s.db, `SELECT id,username,email,phone,COALESCE(avatar_url,''),created_at,deleted_at FROM users ORDER BY id ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -29,7 +29,7 @@ func (s *AuthService) ListUsers(ctx context.Context) ([]models.User, error) {
 	for rows.Next() {
 		var u models.User
 		var deletedAt sql.NullTime
-		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.Phone, &u.CreatedAt, &deletedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.Phone, &u.AvatarURL, &u.CreatedAt, &deletedAt); err != nil {
 			return nil, err
 		}
 		if deletedAt.Valid {
@@ -49,7 +49,7 @@ func (s *AuthService) ListUsersPaged(ctx context.Context, page, pageSize int) ([
 	}
 
 	limit, offset := normalizePagination(page, pageSize)
-	rows, err := database.QueryCtx(ctx, s.db, `SELECT id,username,email,phone,created_at,deleted_at FROM users ORDER BY id ASC LIMIT $1 OFFSET $2`, limit, offset)
+	rows, err := database.QueryCtx(ctx, s.db, `SELECT id,username,email,phone,COALESCE(avatar_url,''),created_at,deleted_at FROM users ORDER BY id ASC LIMIT $1 OFFSET $2`, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -58,7 +58,7 @@ func (s *AuthService) ListUsersPaged(ctx context.Context, page, pageSize int) ([
 	for rows.Next() {
 		var u models.User
 		var deletedAt sql.NullTime
-		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.Phone, &u.CreatedAt, &deletedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.Phone, &u.AvatarURL, &u.CreatedAt, &deletedAt); err != nil {
 			return nil, 0, err
 		}
 		if deletedAt.Valid {
