@@ -61,6 +61,19 @@ type AskAssistantRequest struct {
 	Question string `json:"question" form:"question"`
 }
 
+type CreateNotificationRequest struct {
+	Title   string `json:"title"   form:"title"   binding:"required,min=1,max=160"`
+	Content string `json:"content" form:"content"`
+	Type    string `json:"type"    form:"type"    binding:"required,oneof=success warning danger info"`
+}
+
+type AnnouncementRequest struct {
+	Title    string `json:"title"    form:"title"    binding:"required,min=1,max=160"`
+	Content  string `json:"content"  form:"content"`
+	Type     string `json:"type"     form:"type"     binding:"required,oneof=info success warning danger"`
+	IsActive bool   `json:"is_active"`
+}
+
 type SiteKnowledgeRequest struct {
 	Question string `json:"question" form:"question"`
 }
@@ -695,6 +708,109 @@ func (c *AdminController) MarkAllNotificationsRead(g *gin.Context) {
 		return
 	}
 	g.JSON(http.StatusOK, gin.H{"message": "notifications marked as read"})
+}
+
+func (c *AdminController) CreateNotification(g *gin.Context) {
+	var req CreateNotificationRequest
+	if err := bindRequest(g, &req); err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	notice, err := c.adminData.CreateNotification(g.Request.Context(), req.Title, req.Content, req.Type)
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create notification"})
+		return
+	}
+	g.JSON(http.StatusCreated, gin.H{"notification": notice})
+}
+
+func (c *AdminController) DeleteNotification(g *gin.Context) {
+	noticeID, ok := parseIDParam(g, "id")
+	if !ok {
+		return
+	}
+	if err := c.adminData.DeleteNotification(g.Request.Context(), noticeID); err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete notification"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"message": "notification deleted"})
+}
+
+func (c *AdminController) ListAnnouncements(g *gin.Context) {
+	page, pageSize := parsePaginationQuery(g)
+	notices, total, err := c.adminData.ListAnnouncements(g.Request.Context(), page, pageSize)
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list announcements"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"announcements": notices, "total": total, "page": page, "page_size": pageSize})
+}
+
+func (c *AdminController) GetActiveAnnouncement(g *gin.Context) {
+	notice, err := c.adminData.GetActiveAnnouncement(g.Request.Context())
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get active announcement"})
+		return
+	}
+	if notice == nil {
+		g.JSON(http.StatusOK, gin.H{"announcement": nil})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"announcement": notice})
+}
+
+// ListPublicAnnouncements 公开公告列表（只需登录，无需特殊权限）
+func (c *AdminController) ListPublicAnnouncements(g *gin.Context) {
+	notices, err := c.adminData.ListActiveAnnouncements(g.Request.Context())
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list public announcements"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"announcements": notices})
+}
+
+func (c *AdminController) CreateAnnouncement(g *gin.Context) {
+	var req AnnouncementRequest
+	if err := bindRequest(g, &req); err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	notice, err := c.adminData.CreateAnnouncement(g.Request.Context(), req.Title, req.Content, req.Type, req.IsActive)
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create announcement"})
+		return
+	}
+	g.JSON(http.StatusCreated, gin.H{"announcement": notice})
+}
+
+func (c *AdminController) UpdateAnnouncement(g *gin.Context) {
+	noticeID, ok := parseIDParam(g, "id")
+	if !ok {
+		return
+	}
+	var req AnnouncementRequest
+	if err := bindRequest(g, &req); err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	notice, err := c.adminData.UpdateAnnouncement(g.Request.Context(), noticeID, req.Title, req.Content, req.Type, req.IsActive)
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update announcement"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"announcement": notice})
+}
+
+func (c *AdminController) DeleteAnnouncement(g *gin.Context) {
+	noticeID, ok := parseIDParam(g, "id")
+	if !ok {
+		return
+	}
+	if err := c.adminData.DeleteAnnouncement(g.Request.Context(), noticeID); err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete announcement"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"message": "announcement deleted"})
 }
 
 func (c *AdminController) AskAssistant(g *gin.Context) {

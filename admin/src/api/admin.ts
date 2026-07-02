@@ -47,6 +47,16 @@ export type Notification = {
   read_at?: string;
 };
 
+export type AdminAnnouncement = {
+  id: number;
+  title: string;
+  content: string;
+  type: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
 export type DashboardSummary = {
   user_count: number;
   active_user_count: number;
@@ -444,6 +454,78 @@ export const markAllNotificationsRead = () => {
   return http.request<{ message: string }>(
     "put",
     "/api/v1/admin/notifications/read-all"
+  );
+};
+
+export const createNotification = (data: {
+  title: string;
+  content: string;
+  type: string;
+}) => {
+  return http.request<{ notification: Notification }>(
+    "post",
+    "/api/v1/admin/notifications",
+    { data }
+  );
+};
+
+export const deleteNotification = (id: number) => {
+  return http.request<{ message: string }>(
+    "delete",
+    `/api/v1/admin/notifications/${id}`
+  );
+};
+
+// ── 后台公告 API ──
+export const getAnnouncements = (params?: PageParams) => {
+  return http.request<PagedResult<"announcements", AdminAnnouncement>>(
+    "get",
+    "/api/v1/admin/announcements",
+    { params }
+  );
+};
+
+// 公开公告列表（所有已登录用户可查看，无需特殊权限）
+export const getPublicAnnouncements = () => {
+  return http.request<{ announcements: AdminAnnouncement[] }>(
+    "get",
+    "/api/v1/admin/announcements/public"
+  );
+};
+
+export const createAnnouncement = (data: {
+  title: string;
+  content: string;
+  type: string;
+  is_active: boolean;
+}) => {
+  return http.request<{ announcement: AdminAnnouncement }>(
+    "post",
+    "/api/v1/admin/announcements",
+    { data }
+  );
+};
+
+export const updateAnnouncement = (
+  id: number,
+  data: {
+    title: string;
+    content: string;
+    type: string;
+    is_active: boolean;
+  }
+) => {
+  return http.request<{ announcement: AdminAnnouncement }>(
+    "put",
+    `/api/v1/admin/announcements/${id}`,
+    { data }
+  );
+};
+
+export const deleteAnnouncement = (id: number) => {
+  return http.request<{ message: string }>(
+    "delete",
+    `/api/v1/admin/announcements/${id}`
   );
 };
 

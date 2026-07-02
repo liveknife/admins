@@ -334,6 +334,105 @@ func (s *AdminDataService) MarkAllNotificationsRead(ctx context.Context, userID 
 	return err
 }
 
+func (s *AdminDataService) ListAnnouncements(ctx context.Context, page, pageSize int) ([]models.AdminAnnouncement, int64, error) {
+	var total int64
+	if err := database.QueryRowCtx(ctx, s.db, `SELECT COUNT(*) FROM admin_announcements`).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	limit, offset := normalizePagination(page, pageSize)
+	rows, err := database.QueryCtx(ctx, s.db,
+		`SELECT id,title,content,type,is_active,created_at,updated_at FROM admin_announcements ORDER BY id DESC LIMIT $1 OFFSET $2`,
+		limit, offset,
+	)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	items := make([]models.AdminAnnouncement, 0)
+	for rows.Next() {
+		var item models.AdminAnnouncement
+		if err := rows.Scan(&item.ID, &item.Title, &item.Content, &item.Type, &item.IsActive, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, 0, err
+		}
+		items = append(items, item)
+	}
+	return items, total, rows.Err()
+}
+
+func (s *AdminDataService) GetActiveAnnouncement(ctx context.Context) (*models.AdminAnnouncement, error) {
+	row := database.QueryRowCtx(ctx, s.db, `SELECT id,title,content,type,is_active,created_at,updated_at FROM admin_announcements WHERE is_active=TRUE ORDER BY id DESC LIMIT 1`)
+	var item models.AdminAnnouncement
+	if err := row.Scan(&item.ID, &item.Title, &item.Content, &item.Type, &item.IsActive, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &item, nil
+}
+
+// ListActiveAnnouncements 返回所有启用的公告（供所有已登录用户查看）
+func (s *AdminDataService) ListActiveAnnouncements(ctx context.Context) ([]models.AdminAnnouncement, error) {
+	rows, err := database.QueryCtx(ctx, s.db,
+		`SELECT id,title,content,type,is_active,created_at,updated_at FROM admin_announcements WHERE is_active=TRUE ORDER BY id DESC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]models.AdminAnnouncement, 0)
+	for rows.Next() {
+		var item models.AdminAnnouncement
+		if err := rows.Scan(&item.ID, &item.Title, &item.Content, &item.Type, &item.IsActive, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *AdminDataService) CreateAnnouncement(ctx context.Context, title, content, noticeType string, isActive bool) (models.AdminAnnouncement, error) {
+	var id int64
+	err := database.QueryRowCtx(ctx, s.db,
+		`INSERT INTO admin_announcements(title,content,type,is_active,created_at,updated_at) VALUES($1,$2,$3,$4,`+database.Now()+`,`+database.Now()+`) RETURNING id`,
+		title, content, noticeType, isActive,
+	).Scan(&id)
+	if err != nil {
+		return models.AdminAnnouncement{}, err
+	}
+	return models.AdminAnnouncement{
+		ID:        id,
+		Title:     title,
+		Content:   content,
+		Type:      noticeType,
+		IsActive:  isActive,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}, nil
+}
+
+func (s *AdminDataService) UpdateAnnouncement(ctx context.Context, id int64, title, content, noticeType string, isActive bool) (models.AdminAnnouncement, error) {
+	_, err := database.ExecCtx(ctx, s.db,
+		`UPDATE admin_announcements SET title=$1,content=$2,type=$3,is_active=$4,updated_at=`+database.Now()+` WHERE id=$5`,
+		title, content, noticeType, isActive, id,
+	)
+	if err != nil {
+		return models.AdminAnnouncement{}, err
+	}
+	return models.AdminAnnouncement{
+		ID:       id,
+		Title:    title,
+		Content:  content,
+		Type:     noticeType,
+		IsActive: isActive,
+	}, nil
+}
+
+func (s *AdminDataService) DeleteAnnouncement(ctx context.Context, id int64) error {
+	_, err := database.ExecCtx(ctx, s.db, `DELETE FROM admin_announcements WHERE id=$1`, id)
+	return err
+}
+
 func (s *AdminDataService) CreateReviewNotification(ctx context.Context, title, content, resourcePath string) error {
 	title = strings.TrimSpace(title)
 	if title == "" {
@@ -351,6 +450,30 @@ func (s *AdminDataService) CreateReviewNotification(ctx context.Context, title, 
 		title,
 		content,
 	)
+	return err
+}
+
+func (s *AdminDataService) CreateNotification(ctx context.Context, title, content, noticeType string) (models.Notification, error) {
+	var id int64
+	err := database.QueryRowCtx(ctx, s.db,
+		`INSERT INTO notifications(title,content,type,is_read,created_at) VALUES($1,$2,$3,FALSE,`+database.Now()+`) RETURNING id`,
+		title, content, noticeType,
+	).Scan(&id)
+	if err != nil {
+		return models.Notification{}, err
+	}
+	return models.Notification{
+		ID:        id,
+		Title:     title,
+		Content:   content,
+		Type:      noticeType,
+		IsRead:    false,
+		CreatedAt: time.Now(),
+	}, nil
+}
+
+func (s *AdminDataService) DeleteNotification(ctx context.Context, id int64) error {
+	_, err := database.ExecCtx(ctx, s.db, `DELETE FROM notifications WHERE id=$1`, id)
 	return err
 }
 

@@ -3,25 +3,34 @@ import { computed, onMounted, reactive, ref } from "vue";
 import dayjs from "dayjs";
 import {
   getNotifications,
+  createNotification,
+  deleteNotification,
   markAllNotificationsRead,
   markNotificationRead,
   type Notification
 } from "@/api/admin";
 import { message } from "@/utils/message";
+import { useI18n } from "@/i18n";
+import { useUserStoreHook } from "@/store/modules/user";
 import RePagination from "@/components/RePagination";
 
 defineOptions({ name: "GoAdminNotifications" });
 
+const { t } = useI18n();
+const userStore = useUserStoreHook();
+
+const canWrite = computed(() =>
+  userStore.permissions.includes("notifications:write")
+);
+
 const loading = ref(false);
 const notices = ref<Notification[]>([]);
 const readStatus = ref("");
-const pagination = reactive({
-  page: 1,
-  pageSize: 10,
-  total: 0
-});
+const pagination = reactive({ page: 1, pageSize: 10, total: 0 });
 
-const unreadCount = computed(() => notices.value.filter(item => !item.is_read).length);
+// 发送通知对话框
+const dialogVisible = ref(false);
+const form = reactive({ title: "", content: "", type: "info" });
 
 const loadData = async () => {
   loading.value = true;
@@ -34,7 +43,7 @@ const loadData = async () => {
     notices.value = res.notifications ?? [];
     pagination.total = res.total ?? 0;
   } catch {
-    message("通知加载失败", { type: "error" });
+    message(t("notif.loadFailed"), { type: "error" });
   } finally {
     loading.value = false;
   }
@@ -48,14 +57,13 @@ const handleFilter = () => {
 const setRead = async (row: Notification) => {
   if (row.is_read) return;
   await markNotificationRead(row.id);
-  message("已标记为已读", { type: "success" });
-  await loadData();
+  loadData();
 };
 
 const setAllRead = async () => {
   await markAllNotificationsRead();
-  message("全部通知已读", { type: "success" });
-  await loadData();
+  message(t("notif.allRead"), { type: "success" });
+  loadData();
 };
 
 const tagType = (type: string) => {
@@ -65,50 +73,114 @@ const tagType = (type: string) => {
   return "info";
 };
 
+const openCreate = () => {
+  form.title = "";
+  form.content = "";
+  form.type = "info";
+  dialogVisible.value = true;
+};
+
+const submitCreate = async () => {
+  if (!form.title.trim()) {
+    message(t("notif.titleRequired"), { type: "warning" });
+    return;
+  }
+  try {
+    await createNotification({
+      title: form.title,
+      content: form.content,
+      type: form.type
+    });
+    message(t("notif.sent"), { type: "success" });
+    dialogVisible.value = false;
+    await loadData();
+  } catch {
+    message(t("notif.sendFailed"), { type: "error" });
+  }
+};
+
+const removeNotification = async (row: Notification) => {
+  try {
+    await deleteNotification(row.id);
+    message(t("notif.deleted"), { type: "success" });
+    await loadData();
+  } catch {
+    /* handled by interceptor */
+  }
+};
+
 onMounted(loadData);
 </script>
 
 <template>
-  <div class="notice-page">
-    <div class="page-head">
-      <div>
-        <h2>通知中心</h2>
-        <p>集中查看系统通知、提醒和待处理消息。</p>
+  <div class="page-container">
+    <div class="page-header">
+      <div class="page-header-left">
+        <h2 class="page-title">{{ t("notif.title") }}</h2>
+        <span class="page-badge">/api/v1/admin/notifications</span>
       </div>
-      <div class="head-actions">
-        <el-tag type="danger" effect="light">本页未读 {{ unreadCount }}</el-tag>
-        <el-button type="primary" @click="setAllRead">全部已读</el-button>
+      <el-space>
+        <el-button v-if="canWrite" type="primary" @click="openCreate">
+          + {{ t("notif.send") }}
+        </el-button>
+        <el-button @click="setAllRead">{{ t("notif.markAllRead") }}</el-button>
+      </el-space>
+    </div>
+
+    <div class="table-card toolbar-card">
+      <div class="toolbar-inner">
+        <el-segmented
+          v-model="readStatus"
+          :options="[
+            { label: t('notif.all'), value: '' },
+            { label: t('notif.unread'), value: 'unread' },
+            { label: t('notif.read'), value: 'read' }
+          ]"
+          @change="handleFilter"
+        />
+        <el-button :loading="loading" @click="loadData">
+          {{ t("common.refresh") }}
+        </el-button>
       </div>
     </div>
 
-    <div class="filter-bar">
-      <el-segmented
-        v-model="readStatus"
-        :options="[
-          { label: '全部', value: '' },
-          { label: '未读', value: 'unread' },
-          { label: '已读', value: 'read' }
-        ]"
-        @change="handleFilter"
-      />
-      <el-button @click="loadData">刷新</el-button>
-    </div>
+    <div class="table-card">
+      <el-table v-loading="loading" :data="notices" stripe class="admin-table" row-key="id">
+        <el-table-column :label="t('notif.type')" width="90">
+          <template #default="{ row }">
+            <el-tag :type="tagType(row.type)" size="small">
+              {{ row.type === "success" ? t("notif.typeSuccess") : row.type === "warning" ? t("notif.typeWarning") : row.type === "danger" ? t("notif.typeDanger") : t("notif.typeInfo") }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="title" :label="t('common.title')" min-width="180" />
+        <el-table-column prop="content" :label="t('notif.content')" min-width="280" show-overflow-tooltip />
+        <el-table-column :label="t('notif.status')" width="100">
+          <template #default="{ row }">
+            <el-tag :type="row.is_read ? 'info' : 'danger'" size="small">
+              {{ row.is_read ? t('notif.read') : t('notif.unread') }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('notif.createdAt')" width="170">
+          <template #default="{ row }">
+            {{ dayjs(row.created_at).format("YYYY-MM-DD HH:mm") }}
+          </template>
+        </el-table-column>
+        <el-table-column v-if="canWrite" :label="t('common.operation')" fixed="right" width="150">
+          <template #default="{ row }">
+            <el-button v-if="!row.is_read" link type="primary" @click="setRead(row)">
+              {{ t("notif.markRead") }}
+            </el-button>
+            <el-popconfirm :title="t('notif.deleteConfirm')" @confirm="removeNotification(row)">
+              <template #reference>
+                <el-button link type="danger">{{ t("common.delete") }}</el-button>
+              </template>
+            </el-popconfirm>
+          </template>
+        </el-table-column>
+      </el-table>
 
-    <div class="notice-list" v-loading="loading">
-      <div v-for="item in notices" :key="item.id" class="notice-item" :class="{ unread: !item.is_read }">
-        <div class="notice-main">
-          <div class="notice-title">
-            <el-tag :type="tagType(item.type)" size="small">{{ item.type || "info" }}</el-tag>
-            <span>{{ item.title }}</span>
-            <el-badge v-if="!item.is_read" is-dot />
-          </div>
-          <div class="notice-content">{{ item.content }}</div>
-          <div class="notice-time">{{ dayjs(item.created_at).format("YYYY-MM-DD HH:mm:ss") }}</div>
-        </div>
-        <el-button v-if="!item.is_read" link type="primary" @click="setRead(item)">标记已读</el-button>
-        <el-tag v-else type="info">已读</el-tag>
-      </div>
-      <el-empty v-if="!loading && notices.length === 0" description="暂无通知" />
       <RePagination
         v-model:page="pagination.page"
         v-model:page-size="pagination.pageSize"
@@ -117,71 +189,113 @@ onMounted(loadData);
         @change="loadData"
       />
     </div>
+
+    <!-- 发送通知弹窗 -->
+    <el-dialog
+      v-model="dialogVisible"
+      :title="t('notif.send')"
+      width="560px"
+      destroy-on-close
+    >
+      <el-form :model="form" label-width="80px">
+        <el-form-item :label="t('notif.type')">
+          <el-select v-model="form.type">
+            <el-option :label="t('notif.typeSuccess')" value="success" />
+            <el-option :label="t('notif.typeWarning')" value="warning" />
+            <el-option :label="t('notif.typeDanger')" value="danger" />
+            <el-option :label="t('notif.typeInfo')" value="info" />
+          </el-select>
+        </el-form-item>
+        <el-form-item :label="t('common.title')" required>
+          <el-input v-model="form.title" :placeholder="t('notif.titlePlaceholder')" maxlength="160" show-word-limit />
+        </el-form-item>
+        <el-form-item :label="t('notif.content')">
+          <el-input v-model="form.content" type="textarea" :rows="5" :placeholder="t('notif.contentPlaceholder')" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="dialogVisible = false">{{ t("common.cancel") }}</el-button>
+        <el-button type="primary" @click="submitCreate">{{ t("notif.send") }}</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
-<style scoped lang="scss">
-.notice-page {
-  padding: 24px;
+<style lang="scss" scoped>
+.page-container {
+  padding: 24px 28px;
 }
-.page-head,
-.filter-bar {
+
+.page-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
 }
-.page-head h2 {
-  margin: 0;
-  font-size: 20px;
-}
-.page-head p {
-  margin: 6px 0 0;
-  color: var(--app-text-secondary);
-}
-.head-actions {
+
+.page-header-left {
   display: flex;
   align-items: center;
   gap: 10px;
 }
-.notice-list {
+
+.page-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--app-text);
+  margin: 0;
+}
+
+.page-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  background: var(--app-bg-soft);
+  color: var(--app-violet);
+  font-size: 11.5px;
+  font-weight: 500;
+  border-radius: 4px;
+  border: 1px solid #e0e7ff;
+  font-family: "Menlo", "Monaco", monospace;
+}
+
+.table-card {
   background: var(--app-surface);
-  border: 1px solid var(--app-border);
   border-radius: 8px;
+  border: 1px solid var(--app-border-soft);
   overflow: hidden;
+  box-shadow: 0 10px 28px rgb(33 49 77 / 8%);
 }
-.notice-item {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 18px 20px;
-  border-bottom: 1px solid var(--app-border-soft);
+
+.toolbar-card {
+  margin-bottom: 16px;
 }
-.notice-item.unread {
-  background: var(--app-surface-soft);
-}
-.notice-title {
+
+.toolbar-inner {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 15px;
-  font-weight: 700;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  flex-wrap: wrap;
 }
-.notice-content {
-  margin-top: 8px;
-  color: var(--app-text-secondary);
-}
-.notice-time {
-  margin-top: 8px;
-  color: var(--app-text-muted);
-  font-size: 12px;
-}
-@media (max-width: 768px) {
-  .page-head,
-  .filter-bar,
-  .notice-item {
-    align-items: flex-start;
-    flex-direction: column;
+
+.admin-table {
+  --el-table-header-bg-color: var(--app-surface-muted);
+  --el-table-header-text-color: var(--app-text-secondary);
+  --el-table-row-hover-bg-color: var(--app-surface-soft);
+
+  :deep(.el-table__header th) {
+    height: 46px;
+    font-weight: 700;
+    background: var(--app-surface-muted) !important;
+  }
+
+  :deep(.el-table__row) {
+    height: 56px;
+  }
+
+  :deep(.el-table__cell) {
+    border-color: var(--app-border-soft);
   }
 }
 </style>

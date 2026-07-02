@@ -30,7 +30,7 @@ const router = useRouter();
 </script>
 
 <template>
-  <div class="navbar bg-[#fff]">
+  <div class="navbar">
     <LaySidebarTopCollapse
       v-if="device === 'mobile'"
       class="hamburger-container"
@@ -91,7 +91,8 @@ const router = useRouter();
   width: 100%;
   height: 52px;
   overflow: hidden;
-  border-bottom: 1px solid #edf0f5;
+  background: var(--app-surface);
+  border-bottom: 1px solid var(--app-border-soft);
   box-shadow: none !important;
 
   .hamburger-container {
@@ -107,7 +108,7 @@ const router = useRouter();
     justify-content: flex-end;
     min-width: 280px;
     height: 52px;
-    color: rgb(0 0 0 / 75%);
+    color: var(--app-text-secondary);
     gap: 2px;
 
     .el-dropdown-link {
@@ -116,13 +117,13 @@ const router = useRouter();
       justify-content: space-around;
       height: 52px;
       padding: 10px 12px;
-      color: rgb(0 0 0 / 75%);
+      color: var(--app-text-secondary);
       cursor: pointer;
       border-radius: 6px;
       transition: background 0.18s;
 
       &:hover {
-        background: #f0f4ff;
+        background: var(--app-surface-soft);
       }
 
       p {
@@ -135,7 +136,7 @@ const router = useRouter();
         width: 26px;
         height: 26px;
         border-radius: 50%;
-        border: 1.5px solid #e5e9f2;
+        border: 1.5px solid var(--app-border);
         object-fit: cover;
       }
     }

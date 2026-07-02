@@ -25,8 +25,8 @@
   width: 100%;
   font-size: 14px;
   color: var(--el-text-color-primary);
-  background: #fff;
-  box-shadow: 0 0 1px #888;
+  background: var(--app-surface);
+  box-shadow: var(--app-shadow-soft);
 
   .scroll-item {
     position: relative;
@@ -65,8 +65,8 @@
         color 0.12s;
 
       &:hover {
-        color: rgb(0 0 0 / 88%) !important;
-        background-color: rgb(0 0 0 / 6%);
+        color: var(--el-text-color-primary) !important;
+        background-color: var(--app-surface-muted);
       }
     }
   }
@@ -129,9 +129,9 @@
     white-space: nowrap;
     outline: 0;
     list-style-type: none;
-    background: #fff;
+    background: var(--app-surface);
     border-radius: 4px;
-    box-shadow: 0 2px 8px rgb(0 0 0 / 15%);
+    box-shadow: var(--app-shadow-soft);
 
     li {
       display: flex;
@@ -169,8 +169,8 @@
 }
 
 .el-dropdown-menu__item:not(.is-disabled):hover {
-  color: #606266;
-  background: #f0f0f0;
+  color: var(--app-text-secondary);
+  background: var(--app-surface-muted);
 }
 
 :deep(.el-dropdown-menu__item) i {
@@ -191,8 +191,8 @@
 
 .scroll-item.is-active {
   position: relative;
-  color: #fff;
-  box-shadow: 0 0 0.7px #888;
+  color: var(--app-text);
+  box-shadow: 0 0 0.7px var(--app-border);
 
   .chrome-tab {
     z-index: 10;
@@ -237,7 +237,7 @@
 }
 
 .arrow-left {
-  box-shadow: 5px 0 5px -6px #ccc;
+  box-shadow: 5px 0 5px -6px var(--app-border);
 
   &:hover {
     cursor: w-resize;
@@ -245,8 +245,8 @@
 }
 
 .arrow-right {
-  border-right: 0.5px solid #ccc;
-  box-shadow: -5px 0 5px -6px #ccc;
+  border-right: 0.5px solid var(--app-border);
+  box-shadow: -5px 0 5px -6px var(--app-border);
 
   &:hover {
     cursor: e-resize;
@@ -264,11 +264,11 @@
 
 /* 卡片模式下鼠标移出隐藏蓝色边框 */
 .card-out {
-  color: #666;
+  color: var(--app-text-muted);
   border: none;
 
   .tag-title {
-    color: #666;
+    color: var(--app-text-muted);
   }
 }
 

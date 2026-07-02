@@ -423,6 +423,7 @@ func buildCreateTables(d *Dialect) []string {
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS chat_messages(id %s,from_user_id BIGINT NOT NULL,to_user_id BIGINT NOT NULL,message_type VARCHAR(20) NOT NULL DEFAULT 'text',content TEXT NOT NULL,media_url VARCHAR(1024) NOT NULL DEFAULT '',file_name VARCHAR(256) NOT NULL DEFAULT '',mime_type VARCHAR(120) NOT NULL DEFAULT '',file_size BIGINT NOT NULL DEFAULT 0,transcript TEXT NOT NULL DEFAULT '',translation TEXT NOT NULL DEFAULT '',created_at %s NOT NULL DEFAULT %s,CONSTRAINT fk_msg_from FOREIGN KEY(from_user_id) REFERENCES users(id),CONSTRAINT fk_msg_to FOREIGN KEY(to_user_id) REFERENCES users(id))`, pk, ts, now),
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS operation_logs(id %s,user_id BIGINT NOT NULL DEFAULT 0,username VARCHAR(100) NOT NULL DEFAULT '',action VARCHAR(80) NOT NULL,resource VARCHAR(120) NOT NULL DEFAULT '',detail TEXT NOT NULL DEFAULT '',ip VARCHAR(80) NOT NULL DEFAULT '',user_agent TEXT NOT NULL DEFAULT '',created_at %s NOT NULL DEFAULT %s)`, pk, ts, now),
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS notifications(id %s,user_id BIGINT,title VARCHAR(160) NOT NULL,content TEXT NOT NULL DEFAULT '',type VARCHAR(40) NOT NULL DEFAULT 'info',is_read BOOLEAN NOT NULL DEFAULT FALSE,created_at %s NOT NULL DEFAULT %s,read_at %s,CONSTRAINT fk_notice_user FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)`, pk, ts, now, ts),
+		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS admin_announcements(id %s,title VARCHAR(160) NOT NULL,content TEXT NOT NULL DEFAULT '',type VARCHAR(20) NOT NULL DEFAULT 'info',is_active BOOLEAN NOT NULL DEFAULT TRUE,created_at %s NOT NULL DEFAULT %s,updated_at %s NOT NULL DEFAULT %s)`, pk, ts, now, ts, now),
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS site_announcements(id %s,title VARCHAR(160) NOT NULL,content TEXT NOT NULL DEFAULT '',link_url VARCHAR(1024) NOT NULL DEFAULT '',is_active BOOLEAN NOT NULL DEFAULT TRUE,sort_order INT NOT NULL DEFAULT 0,starts_at %s,ends_at %s,created_at %s NOT NULL DEFAULT %s,updated_at %s NOT NULL DEFAULT %s)`, pk, ts, ts, ts, now, ts, now),
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS site_banners(id %s,title VARCHAR(160) NOT NULL,subtitle VARCHAR(255) NOT NULL DEFAULT '',image_url VARCHAR(1024) NOT NULL DEFAULT '',link_url VARCHAR(1024) NOT NULL DEFAULT '',is_active BOOLEAN NOT NULL DEFAULT TRUE,sort_order INT NOT NULL DEFAULT 0,created_at %s NOT NULL DEFAULT %s,updated_at %s NOT NULL DEFAULT %s)`, pk, ts, now, ts, now),
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS site_resources(id %s,title VARCHAR(180) NOT NULL,slug VARCHAR(180) NOT NULL DEFAULT '',summary VARCHAR(500) NOT NULL DEFAULT '',content TEXT NOT NULL DEFAULT '',markdown_content TEXT NOT NULL DEFAULT '',category VARCHAR(80) NOT NULL DEFAULT 'learning',cover_url VARCHAR(1024) NOT NULL DEFAULT '',link_url VARCHAR(1024) NOT NULL DEFAULT '',tags VARCHAR(500) NOT NULL DEFAULT '',seo_title VARCHAR(180) NOT NULL DEFAULT '',seo_description VARCHAR(300) NOT NULL DEFAULT '',seo_keywords VARCHAR(300) NOT NULL DEFAULT '',status VARCHAR(20) NOT NULL DEFAULT 'draft',is_featured BOOLEAN NOT NULL DEFAULT FALSE,view_count BIGINT NOT NULL DEFAULT 0,sort_order INT NOT NULL DEFAULT 0,published_at %s,created_at %s NOT NULL DEFAULT %s,updated_at %s NOT NULL DEFAULT %s)`, pk, ts, ts, now, ts, now),
@@ -771,6 +772,18 @@ func knownSchemaComments() map[string]schemaComment {
 				"read_at":    "阅读时间",
 			},
 		},
+		"admin_announcements": {
+			Table: "后台公告表",
+			Columns: map[string]string{
+				"id":         "公告ID",
+				"title":      "公告标题",
+				"content":    "公告内容",
+				"type":       "公告类型",
+				"is_active":  "是否启用",
+				"created_at": "创建时间",
+				"updated_at": "更新时间",
+			},
+		},
 		"site_announcements": {
 			Table: "官网公告表",
 			Columns: map[string]string{
@@ -1112,6 +1125,7 @@ func seedRBAC(db *sql.DB, d *Dialect) error {
 		{"roles:read", "View roles and permissions"}, {"roles:write", "Manage roles and role permissions"}, {"permissions:read", "View permissions"},
 		{"dashboard:read", "View dashboard data"}, {"logs:read", "View operation logs"},
 		{"notifications:read", "View notifications"}, {"notifications:write", "Manage notifications"},
+		{"announcements:read", "View admin announcements"}, {"announcements:write", "Manage admin announcements"},
 		{"ai:assistant", "Use admin AI assistant"}, {"health:read", "View system health"},
 		{"database:read", "View database table metadata"},
 		{"site:read", "View website content"}, {"site:write", "Manage website content and assets"},

@@ -41,7 +41,7 @@ const handleCommand = (value: Locale) => {
   height: 48px;
   padding: 0 10px;
   font-size: 14px;
-  color: #000000d9;
+  color: var(--app-text-secondary);
   cursor: pointer;
 }
 

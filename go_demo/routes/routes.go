@@ -309,6 +309,16 @@ func buildRouteSpecs(
 		{Method: "GET", Path: "/api/v1/admin/notifications/unread-count", Handler: adminCtrl.UnreadNotificationCount, Auth: true, Permission: "notifications:read", Doc: docs.Op{Summary: "未读通知数", Tags: []string{"Admin · Notifications"}}},
 		{Method: "PUT", Path: "/api/v1/admin/notifications/:id/read", Handler: adminCtrl.MarkNotificationRead, Auth: true, Permission: "notifications:write", Doc: docs.Op{Summary: "标记单条已读", Tags: []string{"Admin · Notifications"}}},
 		{Method: "PUT", Path: "/api/v1/admin/notifications/read-all", Handler: adminCtrl.MarkAllNotificationsRead, Auth: true, Permission: "notifications:write", Doc: docs.Op{Summary: "全部标记已读", Tags: []string{"Admin · Notifications"}}},
+		{Method: "POST", Path: "/api/v1/admin/notifications", Handler: adminCtrl.CreateNotification, Auth: true, Permission: "notifications:write", Doc: docs.Op{Summary: "创建通知（推送）", Tags: []string{"Admin · Notifications"}, Body: docs.Body{Required: true, Schema: controllers.CreateNotificationRequest{}}}},
+		{Method: "DELETE", Path: "/api/v1/admin/notifications/:id", Handler: adminCtrl.DeleteNotification, Auth: true, Permission: "notifications:write", Doc: docs.Op{Summary: "删除通知", Tags: []string{"Admin · Notifications"}}},
+
+		// ── Admin：后台公告 ──
+		{Method: "GET", Path: "/api/v1/admin/announcements", Handler: adminCtrl.ListAnnouncements, Auth: true, Permission: "announcements:read", Doc: docs.Op{Summary: "公告分页", Tags: []string{"Admin · Announcements"}, Params: pageQuery}},
+		{Method: "GET", Path: "/api/v1/admin/announcements/active", Handler: adminCtrl.GetActiveAnnouncement, Auth: false, Permission: "", Doc: docs.Op{Summary: "最新启用的公告（用于布局横幅），无需认证", Tags: []string{"Admin · Announcements"}}},
+		{Method: "GET", Path: "/api/v1/admin/announcements/public", Handler: adminCtrl.ListPublicAnnouncements, Auth: true, Permission: "", Doc: docs.Op{Summary: "公开公告列表（所有已登录用户可查看）", Tags: []string{"Admin · Announcements"}}},
+		{Method: "POST", Path: "/api/v1/admin/announcements", Handler: adminCtrl.CreateAnnouncement, Auth: true, Permission: "announcements:write", Doc: docs.Op{Summary: "创建公告", Tags: []string{"Admin · Announcements"}, Body: docs.Body{Required: true, Schema: controllers.AnnouncementRequest{}}}},
+		{Method: "PUT", Path: "/api/v1/admin/announcements/:id", Handler: adminCtrl.UpdateAnnouncement, Auth: true, Permission: "announcements:write", Doc: docs.Op{Summary: "编辑公告", Tags: []string{"Admin · Announcements"}, Body: docs.Body{Required: true, Schema: controllers.AnnouncementRequest{}}}},
+		{Method: "DELETE", Path: "/api/v1/admin/announcements/:id", Handler: adminCtrl.DeleteAnnouncement, Auth: true, Permission: "announcements:write", Doc: docs.Op{Summary: "删除公告", Tags: []string{"Admin · Announcements"}}},
 
 		// ── Admin：AI & 系统健康 ──
 		{Method: "POST", Path: "/api/v1/admin/ai/ask", Handler: adminCtrl.AskAssistant, Auth: true, Permission: "ai:assistant", Doc: docs.Op{Summary: "AI 助手提问", Tags: []string{"Admin · System"}, Body: docs.Body{Required: true, Schema: controllers.AskAssistantRequest{}}}},

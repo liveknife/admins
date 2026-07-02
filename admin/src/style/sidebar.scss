@@ -48,7 +48,7 @@
     height: 100vh;
     min-height: 100%;
     margin-left: $sideBarWidth;
-    background: #f4f6f9;
+    background: var(--app-bg);
 
     /* main-content 灞炴€у姩鐢?*/
     transition: margin-left var(--pure-transition-duration);

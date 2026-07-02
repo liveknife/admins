@@ -70,6 +70,19 @@ const buildAdminRoutes = (user: GoUser) => {
     });
   }
 
+  if (hasAdminAccess && permissions.includes("announcements:read")) {
+    children.push({
+      path: "/go-admin/announcements",
+      component: "go-admin/announcements/index",
+      name: "GoAdminAnnouncements",
+      meta: {
+        title: "后台公告",
+        icon: "ri:megaphone-line",
+        auths: ["announcements:read", "announcements:write"]
+      }
+    });
+  }
+
   if (hasAdminAccess && permissions.includes("ai:assistant")) {
     toolChildren.push({
       path: "/system-tools/ai-assistant",

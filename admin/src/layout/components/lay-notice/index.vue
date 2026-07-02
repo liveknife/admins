@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import dayjs from "dayjs";
 import BellIcon from "~icons/ep/bell";
@@ -7,36 +7,45 @@ import {
   getNotifications,
   getUnreadNotificationCount,
   markNotificationRead,
-  type Notification
+  getPublicAnnouncements,
+  type Notification,
+  type AdminAnnouncement
 } from "@/api/admin";
+import { useUserStoreHook } from "@/store/modules/user";
 
 const TEXT = {
-  title: "\u901a\u77e5\u4e2d\u5fc3",
-  all: "\u67e5\u770b\u5168\u90e8",
-  empty: "\u6682\u65e0\u672a\u8bfb\u901a\u77e5",
-  footer: "\u8fdb\u5165\u901a\u77e5\u4e2d\u5fc3",
+  notice: "\u901a\u77e5",
+  announce: "\u516c\u544a",
+  noticeEmpty: "\u6682\u65e0\u672a\u8bfb\u901a\u77e5",
+  announceEmpty: "\u6682\u65e0\u516c\u544a",
+  allNotices: "\u67e5\u770b\u5168\u90e8\u901a\u77e5",
+  allAnnounces: "\u67e5\u770b\u516c\u544a",
   noUnread: "\u6682\u65e0\u672a\u8bfb\u6d88\u606f",
   unreadPrefix: "\u8fd8\u6709",
-  unreadSuffix: "\u6761\u672a\u8bfb\u6d88\u606f",
-  typeSuccess: "\u6210\u529f",
-  typeWarning: "\u63d0\u9192",
-  typeDanger: "\u91cd\u8981",
-  typeInfo: "\u901a\u77e5"
+  unreadSuffix: "\u6761\u672a\u8bfb"
 };
 
+type TabType = "notice" | "announce";
+
 const router = useRouter();
+const userStore = useUserStoreHook();
+const activeTab = ref<TabType>("notice");
 const loading = ref(false);
 const unread = ref(0);
 const notices = ref<Notification[]>([]);
+const announcements = ref<AdminAnnouncement[]>([]);
 
 const badgeValue = computed(() => (unread.value > 0 ? unread.value : ""));
+// 是否有公告管理权限
+const canManageAnnounce = computed(() =>
+  userStore.permissions.includes("announcements:write")
+);
 const previewList = computed(() => notices.value.slice(0, 5));
 const subtitle = computed(() =>
-  unread.value > 0
-    ? `${TEXT.unreadPrefix} ${unread.value} ${TEXT.unreadSuffix}`
-    : TEXT.noUnread
+  unread.value > 0 ? `${TEXT.unreadPrefix} ${unread.value} ${TEXT.unreadSuffix}` : TEXT.noUnread
 );
 
+/* ── 数据加载 ── */
 const loadNotices = async () => {
   loading.value = true;
   try {
@@ -51,20 +60,39 @@ const loadNotices = async () => {
   }
 };
 
+const loadAnnouncements = async () => {
+  try {
+    const res = await getPublicAnnouncements();
+    announcements.value = res.announcements ?? [];
+  } catch {
+    announcements.value = [];
+  }
+};
+
+watch(activeTab, tab => {
+  if (tab === "announce" && announcements.value.length === 0) loadAnnouncements();
+});
+
+/* ── 操作 ── */
 const setRead = async (item: Notification) => {
   await markNotificationRead(item.id);
   await loadNotices();
 };
 
-const goCenter = () => {
+const goNoticeCenter = () => {
   router.push("/go-admin/notifications");
 };
 
+const goAnnounceCenter = () => {
+  router.push("/go-admin/announcements");
+};
+
+/* ── 样式辅助 ── */
 const getNoticeTypeText = (type: string) => {
-  if (type === "success") return TEXT.typeSuccess;
-  if (type === "warning") return TEXT.typeWarning;
-  if (type === "danger") return TEXT.typeDanger;
-  return TEXT.typeInfo;
+  if (type === "success") return "\u6210\u529f";
+  if (type === "warning") return "\u63d0\u9192";
+  if (type === "danger") return "\u91cd\u8981";
+  return "\u901a\u77e5";
 };
 
 const getNoticeClass = (type: string) => {
@@ -74,6 +102,20 @@ const getNoticeClass = (type: string) => {
   return "is-info";
 };
 
+const announceBadgeColor = (type: string) => {
+  if (type === "success") return "var(--app-green)";
+  if (type === "warning") return "#d97706";
+  if (type === "danger") return "var(--app-red)";
+  return "var(--app-primary)";
+};
+
+const announceBadgeBg = (type: string) => {
+  if (type === "success") return "#f0fdf4";
+  if (type === "warning") return "#fffbeb";
+  if (type === "danger") return "#fef2f2";
+  return "var(--app-bg-soft)";
+};
+
 onMounted(loadNotices);
 </script>
 
@@ -81,8 +123,8 @@ onMounted(loadNotices);
   <el-dropdown
     trigger="click"
     placement="bottom-end"
-    popper-class="notice-popper"
-    @visible-change="visible => visible && loadNotices()"
+    popper-class="message-popper"
+    @visible-change="(visible: boolean) => visible && loadNotices()"
   >
     <span class="dropdown-badge navbar-bg-hover select-none">
       <el-badge :value="badgeValue" :max="99">
@@ -92,44 +134,96 @@ onMounted(loadNotices);
       </el-badge>
     </span>
     <template #dropdown>
-      <div class="notice-dropdown" v-loading="loading">
-        <div class="notice-head">
-          <div>
-            <div class="notice-head-title">{{ TEXT.title }}</div>
-            <div class="notice-head-subtitle">{{ subtitle }}</div>
-          </div>
-          <el-button class="notice-head-action" link type="primary" @click.stop="goCenter">
-            {{ TEXT.all }}
-          </el-button>
+      <div class="message-panel" v-loading="loading">
+        <!-- Tab 切换栏 -->
+        <div class="msg-tabs">
+          <button
+            class="msg-tab"
+            :class="{ 'is-active': activeTab === 'notice' }"
+            @click.stop="activeTab = 'notice'"
+          >
+            {{ TEXT.notice }}
+            <span v-if="unread > 0" class="msg-tab-badge">{{ unread }}</span>
+          </button>
+          <button
+            class="msg-tab"
+            :class="{ 'is-active': activeTab === 'announce' }"
+            @click.stop="activeTab = 'announce'"
+          >
+            {{ TEXT.announce }}
+          </button>
+          <!-- 底部滑块 -->
+          <div
+            class="msg-tab-slider"
+            :style="{ transform: activeTab === 'notice' ? 'translateX(0)' : 'translateX(100%)' }"
+          />
         </div>
 
-        <el-scrollbar max-height="340px">
-          <div v-if="previewList.length" class="notice-list">
+        <!-- 通知列表 -->
+        <template v-if="activeTab === 'notice'">
+          <div v-if="previewList.length" class="msg-list">
             <button
               v-for="item in previewList"
               :key="item.id"
-              class="notice-item"
+              class="msg-item notice-item"
               type="button"
               @click="setRead(item)"
             >
-              <span class="notice-status" :class="getNoticeClass(item.type)" />
-              <span class="notice-body">
-                <span class="notice-row">
-                  <span class="notice-title">{{ item.title }}</span>
-                  <span class="notice-type" :class="getNoticeClass(item.type)">
+              <span class="msg-dot" :class="getNoticeClass(item.type)" />
+              <span class="msg-body">
+                <span class="msg-row">
+                  <span class="msg-title">{{ item.title }}</span>
+                  <span class="msg-tag" :class="getNoticeClass(item.type)">
                     {{ getNoticeTypeText(item.type) }}
                   </span>
                 </span>
-                <span class="notice-content">{{ item.content }}</span>
-                <span class="notice-time">{{ dayjs(item.created_at).format("MM-DD HH:mm") }}</span>
+                <span class="msg-desc">{{ item.content }}</span>
+                <span class="msg-time">{{ dayjs(item.created_at).format("MM-DD HH:mm") }}</span>
               </span>
             </button>
-            <button class="notice-footer" type="button" @click.stop="goCenter">
-              {{ TEXT.footer }}
+            <button class="msg-footer" type="button" @click.stop="goNoticeCenter">
+              {{ TEXT.allNotices }} &rarr;
             </button>
           </div>
-          <el-empty v-else :description="TEXT.empty" :image-size="72" />
-        </el-scrollbar>
+          <div v-else class="msg-empty">
+            <IconifyIconOffline :icon="BellIcon" class="msg-empty-icon" />
+            <p>{{ TEXT.noticeEmpty }}</p>
+          </div>
+        </template>
+
+        <!-- 公告列表 -->
+        <template v-else>
+          <div v-if="announcements.length" class="msg-list">
+            <div
+              v-for="item in announcements.slice(0, 5)"
+              :key="item.id"
+              class="msg-item announce-item"
+            >
+              <span
+                class="announce-tag"
+                :style="{
+                  color: announceBadgeColor(item.type),
+                  background: announceBadgeBg(item.type)
+                }"
+              >
+                {{ getNoticeTypeText(item.type) }}
+              </span>
+              <span class="msg-body">
+                <span class="msg-title">{{ item.title }}</span>
+                <span class="msg-desc">{{ item.content || "-" }}</span>
+                <span class="msg-time">
+                  {{ dayjs(item.updated_at || item.created_at).format("YYYY-MM-DD HH:mm") }}
+                </span>
+              </span>
+            </div>
+            <button v-if="canManageAnnounce" class="msg-footer" type="button" @click.stop="goAnnounceCenter">
+              {{ TEXT.allAnnounces }} &rarr;
+            </button>
+          </div>
+          <div v-else class="msg-empty">
+            <p>{{ TEXT.announceEmpty }}</p>
+          </div>
+        </template>
       </div>
     </template>
   </el-dropdown>
@@ -149,183 +243,314 @@ onMounted(loadNotices);
   }
 }
 
-.notice-dropdown {
-  width: 380px;
+/* ── 面板容器 ── */
+.message-panel {
+  width: 400px;
   padding: 0;
   overflow: hidden;
-  background: #fff;
-  border: 1px solid #e7ebf3;
-  border-radius: 8px;
-  box-shadow: 0 18px 45px rgb(15 23 42 / 14%);
+  background: var(--app-surface);
+  border: 1px solid var(--app-border);
+  border-radius: 12px;
+  box-shadow:
+    0 4px 24px rgba(0, 0, 0, 0.08),
+    0 0 0 1px rgba(0, 0, 0, 0.02);
 }
 
-.notice-head {
+/* ── Tab 栏 ── */
+.msg-tabs {
+  position: relative;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 18px 14px;
-  background: linear-gradient(180deg, #f8fbff 0%, #fff 100%);
-  border-bottom: 1px solid #edf0f5;
+  gap: 0;
+  padding: 4px 16px 0;
+  background: var(--app-surface);
 }
 
-.notice-head-title {
-  color: #111827;
-  font-size: 15px;
-  font-weight: 700;
-  line-height: 22px;
-}
-
-.notice-head-subtitle {
-  margin-top: 2px;
-  color: #7b8494;
-  font-size: 12px;
-  line-height: 18px;
-}
-
-.notice-head-action {
-  height: 28px;
-  padding: 0 4px;
-  font-weight: 600;
-}
-
-.notice-list {
-  padding: 8px;
-}
-
-.notice-item {
-  display: grid;
-  grid-template-columns: 8px minmax(0, 1fr);
-  gap: 10px;
-  width: 100%;
-  padding: 12px;
-  text-align: left;
+.msg-tab {
+  position: relative;
+  flex: 1;
+  height: 40px;
+  padding: 0;
+  color: var(--app-text-muted);
+  font-size: 14px;
+  font-weight: 500;
   cursor: pointer;
   background: transparent;
   border: 0;
-  border-radius: 8px;
-  transition:
-    background 0.15s,
-    transform 0.15s;
+  transition: color 0.25s;
 
   &:hover {
-    background: #f8fbff;
-    transform: translateY(-1px);
+    color: var(--app-text-secondary);
+  }
+
+  &.is-active {
+    color: var(--app-text);
+    font-weight: 600;
   }
 }
 
-.notice-status {
+.msg-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 6px;
+  padding: 0 5px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  color: var(--app-red);
+  background: var(--app-red);
+  border-radius: 9px;
+  vertical-align: middle;
+
+  /* 白色文字 */
+  color: #fff;
+}
+
+.msg-tab-slider {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 50%;
+  height: 2px;
+  background: var(--app-primary);
+  border-radius: 1px;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── 列表区 ── */
+.msg-list {
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 8px 12px 4px;
+
+  &::-webkit-scrollbar {
+    width: 4px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: var(--app-border-soft);
+    border-radius: 2px;
+  }
+}
+
+/* ── 通用条目 ── */
+.msg-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  width: 100%;
+  padding: 14px 12px;
+  text-align: left;
+  cursor: default;
+  background: transparent;
+  border: none;
+  border-radius: 10px;
+  transition: background 0.15s;
+
+  &:hover {
+    background: var(--app-surface-soft);
+  }
+
+  &.notice-item {
+    cursor: pointer;
+
+    &:hover {
+      background: var(--app-surface-soft);
+      transform: translateY(-1px);
+    }
+  }
+
+  &.announce-item {
+    cursor: default;
+  }
+}
+
+.msg-dot {
+  flex-shrink: 0;
   width: 8px;
   height: 8px;
-  margin-top: 7px;
+  margin-top: 8px;
   border-radius: 50%;
-  background: #2f6bff;
+  background: var(--app-primary);
+
+  &.is-success {
+    background: var(--app-green);
+  }
+
+  &.is-warning {
+    background: #d97706;
+  }
+
+  &.is-danger {
+    background: var(--app-red);
+  }
 }
 
-.notice-status.is-success {
-  background: #16a34a;
+.announce-tag {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 22px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 6px;
 }
 
-.notice-status.is-warning {
-  background: #d97706;
-}
-
-.notice-status.is-danger {
-  background: #dc2626;
-}
-
-.notice-body {
+.msg-body {
   min-width: 0;
 }
 
-.notice-row {
+.msg-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
 }
 
-.notice-title {
-  min-width: 0;
+.msg-title {
   overflow: hidden;
-  color: #111827;
-  font-size: 14px;
-  font-weight: 700;
-  line-height: 22px;
+  color: var(--app-text);
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 20px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.notice-type {
-  flex: 0 0 auto;
-  height: 22px;
+.msg-tag {
+  flex-shrink: 0;
+  height: 20px;
   padding: 0 8px;
-  color: #2563eb;
-  font-size: 12px;
-  line-height: 22px;
-  background: #eff6ff;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 20px;
+  background: var(--app-bg-soft);
   border-radius: 999px;
+
+  color: var(--app-primary);
+
+  &.is-success {
+    color: var(--app-green);
+    background: #f0fdf4;
+  }
+
+  &.is-warning {
+    color: #d97706;
+    background: #fffbeb;
+  }
+
+  &.is-danger {
+    color: var(--app-red);
+    background: #fef2f2;
+  }
 }
 
-.notice-type.is-success {
-  color: #15803d;
-  background: #f0fdf4;
-}
-
-.notice-type.is-warning {
-  color: #b45309;
-  background: #fffbeb;
-}
-
-.notice-type.is-danger {
-  color: #b91c1c;
-  background: #fef2f2;
-}
-
-.notice-content {
+.msg-desc {
   display: -webkit-box;
   margin-top: 4px;
   overflow: hidden;
-  color: #6b7280;
-  font-size: 12px;
-  line-height: 18px;
+  color: var(--app-text-secondary);
+  font-size: 12.5px;
+  line-height: 19px;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
 
-.notice-time {
-  display: block;
-  margin-top: 7px;
-  color: #9ca3af;
+.msg-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  color: var(--app-text-muted);
   font-size: 12px;
-  line-height: 18px;
+  line-height: 17px;
 }
 
-.notice-footer {
-  width: 100%;
-  height: 36px;
-  margin-top: 2px;
-  color: #2f6bff;
+.status-active {
+  display: inline-block;
+  padding: 0 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--app-green);
+  background: #f0fdf4;
+  border-radius: 4px;
+}
+
+.status-inactive {
+  display: inline-block;
+  padding: 0 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--app-text-muted);
+  background: var(--app-surface-muted);
+  border-radius: 4px;
+}
+
+/* ── Footer 按钮 ── */
+.msg-footer {
+  width: calc(100% - 24px);
+  height: 38px;
+  margin: 4px 12px 10px;
+  color: var(--app-primary);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  background: #f6f8fb;
-  border: 0;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--app-primary) 6%, transparent) 0%,
+    color-mix(in srgb, var(--app-primary) 10%, transparent) 100%
+  );
+  border: 1px solid color-mix(in srgb, var(--app-primary) 15%, transparent);
   border-radius: 8px;
-  transition: background 0.15s;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
 
   &:hover {
-    background: #edf3ff;
+    background: linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--app-primary) 10%, transparent) 0%,
+      color-mix(in srgb, var(--app-primary) 15%, transparent) 100%
+    );
+    border-color: color-mix(in srgb, var(--app-primary) 30%, transparent);
   }
 }
 
-:global(.notice-popper.el-popper) {
-  border: 0 !important;
-  border-radius: 8px !important;
-  box-shadow: none !important;
+/* ── 空状态 ── */
+.msg-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  color: var(--app-text-muted);
+
+  p {
+    margin-top: 12px;
+    font-size: 13px;
+  }
 }
 
-:global(.notice-popper .el-popper__arrow::before) {
-  background: #f8fbff !important;
-  border-color: #e7ebf3 !important;
+.msg-empty-icon {
+  opacity: 0.35;
+  font-size: 32px;
+}
+</style>
+
+<style lang="scss">
+/* 全局 popper 样式（不能 scoped） */
+.message-popper.el-popper {
+  border: 0 !important;
+  border-radius: 12px !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+.message-popper .el-popper__arrow::before {
+  background: var(--app-surface) !important;
+  border-color: var(--app-border) !important;
 }
 </style>
