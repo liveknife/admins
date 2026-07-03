@@ -1,10 +1,10 @@
 /**
- * 极简 Markdown → HTML 渲染器。
- * 覆盖官网文章展示需要的语法：标题、列表、有序列表、引用、代码块（带语言）、
+ * Markdown → HTML 渲染器（带 Shiki 语法高亮）。
+ * 覆盖官网文章展示需要的语法：标题、列表、有序列表、引用、代码块（带语言 + 高亮）、
  * 行内代码、粗体、斜体、删除线、链接、图片、水平线、段落、内嵌 HTML 里的换行。
- * 有意保持无依赖：无 remark/marked/highlight.js。
- * 对不认识的语法直接以段落文本落回，保证不会崩溃。
  */
+
+import { createHighlighter, type Highlighter } from "shiki";
 
 const escapeMap: Record<string, string> = {
   "&": "&amp;",
@@ -153,35 +153,108 @@ const tokenize = (source: string): Token[] => {
   return tokens;
 };
 
-const renderTokens = (tokens: Token[]) =>
-  tokens
-    .map(token => {
-      switch (token.type) {
-        case "heading":
-          return `<h${token.level} id="${token.slug}">${applyInline(token.text)}</h${token.level}>`;
-        case "code":
-          return `<pre class="md-code" data-lang="${escapeHtml(token.lang || "text")}"><code>${escapeHtml(token.body)}</code></pre>`;
-        case "ul":
-          return `<ul>${token.items.map(item => `<li>${applyInline(item)}</li>`).join("")}</ul>`;
-        case "ol":
-          return `<ol>${token.items.map(item => `<li>${applyInline(item)}</li>`).join("")}</ol>`;
-        case "quote":
-          return `<blockquote>${applyInline(token.text)}</blockquote>`;
-        case "hr":
-          return "<hr />";
-        case "paragraph":
-        default:
-          return `<p>${applyInline(token.text)}</p>`;
+// ─── Shiki 高亮器单例 ──────────────────────────────
+
+let highlighterPromise: Promise<Highlighter> | null = null;
+
+function getHighlighter(): Promise<Highlighter> {
+  if (!highlighterPromise) {
+    highlighterPromise = createHighlighter({
+      themes: ["github-dark"],
+      langs: [
+        "javascript",
+        "typescript",
+        "jsx",
+        "tsx",
+        "html",
+        "css",
+        "json",
+        "markdown",
+        "bash",
+        "python",
+        "go",
+        "rust",
+        "java",
+        "sql",
+        "yaml",
+        "xml",
+        "c",
+        "cpp",
+        "shell"
+      ]
+    });
+  }
+  return highlighterPromise;
+}
+
+async function highlightCode(code: string, lang: string): Promise<string> {
+  try {
+    const hl = await getHighlighter();
+    const resolvedLang = hl.getLoadedLanguages().includes(lang)
+      ? lang
+      : "text";
+    return hl.codeToHtml(code, {
+      lang: resolvedLang,
+      theme: "github-dark"
+    });
+  } catch {
+    // 降级：无高亮纯文本
+    return `<pre class="md-code" data-lang="${escapeHtml(lang || "text")}"><code>${escapeHtml(code)}</code></pre>`;
+  }
+}
+
+// ─── 渲染 Token 列表为 HTML（异步） ─────────────────
+
+const renderTokensAsync = async (tokens: Token[]): Promise<string> => {
+  const parts: string[] = [];
+
+  for (const token of tokens) {
+    switch (token.type) {
+      case "heading":
+        parts.push(`<h${token.level} id="${token.slug}">${applyInline(token.text)}</h${token.level}>`);
+        break;
+
+      case "code": {
+        const highlighted = await highlightCode(token.body, token.lang);
+        parts.push(highlighted);
+        break;
       }
-    })
-    .join("\n");
+
+      case "ul":
+        parts.push(`<ul>${token.items.map(item => `<li>${applyInline(item)}</li>`).join("")}</ul>`);
+        break;
+
+      case "ol":
+        parts.push(`<ol>${token.items.map(item => `<li>${applyInline(item)}</li>`).join("")}</ol>`);
+        break;
+
+      case "quote":
+        parts.push(`<blockquote>${applyInline(token.text)}</blockquote>`);
+        break;
+
+      case "hr":
+        parts.push("<hr />");
+        break;
+
+      case "paragraph":
+      default:
+        parts.push(`<p>${applyInline(token.text)}</p>`);
+        break;
+    }
+  }
+
+  return parts.join("\n");
+};
 
 export type Heading = { level: number; text: string; slug: string };
 
-export const renderMarkdown = (source: string): { html: string; headings: Heading[] } => {
+export const renderMarkdown = async (
+  source: string
+): Promise<{ html: string; headings: Heading[] }> => {
   const tokens = tokenize(source ?? "");
   const headings: Heading[] = tokens
     .filter((t): t is Extract<Token, { type: "heading" }> => t.type === "heading")
     .map(({ level, text, slug }) => ({ level, text, slug }));
-  return { html: renderTokens(tokens), headings };
+  const html = await renderTokensAsync(tokens);
+  return { html, headings };
 };

@@ -383,6 +383,34 @@ canvas {
   line-height: 1.8;
 }
 
+.answerSources {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.answerSources div {
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .045);
+}
+
+.answerSources strong,
+.answerSources small {
+  display: block;
+}
+
+.answerSources strong {
+  color: #eef5ff;
+  overflow-wrap: anywhere;
+}
+
+.answerSources small {
+  margin-top: 4px;
+  color: #8ea0bd;
+}
+
 .answerLinks {
   display: flex;
   flex-wrap: wrap;
@@ -1309,6 +1337,30 @@ canvas {
   color: #e2e8f0;
 }
 
+/* 加载动画 */
+.articleLoading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 120px 24px;
+  color: #94a3b8;
+}
+
+.loadingSpinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid rgba(148, 163, 184, 0.2);
+  border-top-color: #7dd3fc;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 .articleCrumbs {
   color: #94a3b8;
   font-size: 13px;
@@ -1486,6 +1538,64 @@ canvas {
   font-size: inherit;
 }
 
+/* ─── Shiki 高亮代码块样式 ────────────────── */
+.articleBody pre.shiki {
+  margin: 1.4em 0;
+  padding: 20px 24px;
+  border-radius: 12px;
+  background: #0d1117 !important;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  overflow-x: auto;
+  font-size: 14px;
+  line-height: 1.65;
+  position: relative;
+}
+
+.articleBody pre.shiki code {
+  background: transparent !important;
+  padding: 0;
+  font-size: inherit;
+  color: inherit;
+}
+
+/* 语言标签（Shiki 不自带，用伪元素模拟） */
+.articleBody pre.shiki::before {
+  content: attr(data-language);
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  font-size: 11px;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+/* 兼容旧版 .md-code 类 */
+.articleBody pre.md-code {
+  margin: 1.4em 0;
+  padding: 20px;
+  border-radius: 12px;
+  background: #0b1120;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  overflow-x: auto;
+  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-size: 14px;
+  line-height: 1.6;
+  position: relative;
+}
+
+.articleBody pre.md-code::before {
+  content: attr(data-lang);
+  position: absolute;
+  top: 8px;
+  right: 14px;
+  font-size: 11px;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
 .articleBody img {
   max-width: 100%;
   border-radius: 12px;
@@ -1520,6 +1630,15 @@ canvas {
   color: #f8fafc;
   font-size: 14px;
   letter-spacing: 0.5px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.articleToc h4 svg,
+.articleRelated h4 svg {
+  color: #7dd3fc;
+  flex-shrink: 0;
 }
 
 .articleToc ul,
@@ -1552,6 +1671,20 @@ canvas {
 .articleToc a:hover,
 .articleRelated a:hover {
   color: #7dd3fc;
+}
+
+/* 目录滚动高亮 */
+.articleToc li.active > a {
+  color: #7dd3fc;
+  font-weight: 600;
+  border-left: 2px solid #7dd3fc;
+  padding-left: 8px;
+  margin-left: -10px;
+}
+
+.articleToc li {
+  position: relative;
+  transition: all 0.2s ease;
 }
 
 .articleLoading,

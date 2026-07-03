@@ -8,7 +8,8 @@ import { useEffect, useState } from "react";
 export type Route =
   | { name: "home" }
   | { name: "article"; slug: string }
-  | { name: "search"; q: string; category: string; tag: string; page: number };
+  | { name: "search"; q: string; category: string; tag: string; page: number }
+  | { name: "demo" };
 
 const decode = (value: string) => {
   try {
@@ -25,6 +26,7 @@ const parseHash = (hash: string): Route => {
   const path = (pathPart || "/").replace(/\/$/, "") || "/";
 
   if (path === "/" || path === "") return { name: "home" };
+  if (path === "/demo") return { name: "demo" };
   if (path === "/search") {
     return {
       name: "search",

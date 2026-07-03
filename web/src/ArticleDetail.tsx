@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { renderMarkdown, type Heading } from "./markdown";
 import {
   apiBase,
@@ -23,6 +23,8 @@ export function ArticleDetail({ slug }: Props) {
   const [article, setArticle] = useState<SiteResource | null>(null);
   const [status, setStatus] = useState<"loading" | "ok" | "notfound" | "error">("loading");
   const [related, setRelated] = useState<SiteResource[]>([]);
+  const [activeHeadingId, setActiveHeadingId] = useState<string>("");
+  const bodyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -48,7 +50,7 @@ export function ArticleDetail({ slug }: Props) {
     };
   }, [slug]);
 
-  // 拉取同分类文章作为“相关阅读”
+  // 拉取同分类文章作为"相关阅读"
   useEffect(() => {
     if (!article?.category) {
       setRelated([]);
@@ -66,13 +68,68 @@ export function ArticleDetail({ slug }: Props) {
       .catch(() => setRelated([]));
   }, [article?.id, article?.category]);
 
-  const rendered = useMemo(() => {
-    if (!article) return { html: "", headings: [] as Heading[] };
+  // 异步渲染 Markdown（含 Shiki 高亮）
+  const [rendered, setRendered] = useState<{ html: string; headings: Heading[] }>({
+    html: "",
+    headings: []
+  });
+
+  useEffect(() => {
+    if (!article) {
+      setRendered({ html: "", headings: [] });
+      return;
+    }
+
+    let cancelled = false;
     const source = article.markdown_content?.trim()
       ? article.markdown_content
       : article.content;
-    return renderMarkdown(source ?? "");
+
+    renderMarkdown(source ?? "").then(result => {
+      if (!cancelled) {
+        setRendered(result);
+      }
+    });
+
+    return () => { cancelled = true; };
   }, [article]);
+
+  // ─── 目录滚动高亮 ──────────────────────────────
+  const observeHeadings = useCallback(() => {
+    if (bodyRef.current === null || rendered.headings.length === 0) return;
+
+    const observer = new IntersectionObserver(
+      entries => {
+        // 找到当前可见且最上方的标题
+        const visible = entries.filter(e => e.isIntersecting);
+        if (visible.length > 0) {
+          // 按位置排序，取最靠前的
+          visible.sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+          setActiveHeadingId(visible[0].target.id);
+        }
+      },
+      {
+        rootMargin: "-80px 0px -60% 0px",
+        threshold: 0
+      }
+    );
+
+    // 观察所有 h2/h3 标题
+    rendered.headings
+      .filter(h => h.level <= 3)
+      .forEach(h => {
+        const el = bodyRef.current?.querySelector(`#${CSS.escape(h.slug)}`);
+        if (el) observer.observe(el);
+      });
+
+    return () => observer.disconnect();
+  }, [rendered.headings]);
+
+  // DOM 更新后重新绑定观察器
+  useEffect(() => {
+    const cleanup = observeHeadings();
+    return cleanup;
+  }, [observeHeadings, rendered.html]);
 
   // 同步 <title> 与 <meta>，便于收藏和分享
   useEffect(() => {
@@ -91,7 +148,10 @@ export function ArticleDetail({ slug }: Props) {
   if (status === "loading") {
     return (
       <section className="articlePage">
-        <div className="articleLoading">正在加载文章...</div>
+        <div className="articleLoading">
+          <div className="loadingSpinner" />
+          <p>正在加载文章...</p>
+        </div>
       </section>
     );
   }
@@ -136,7 +196,7 @@ export function ArticleDetail({ slug }: Props) {
         <h1>{article.title}</h1>
         {article.summary && <p className="articleSummary">{article.summary}</p>}
         <div className="articleMeta">
-          <span>{formatDate(article.published_at)}</span>
+          <time>{formatDate(article.published_at)}</time>
           <span>{article.view_count} 次阅读</span>
         </div>
         {tags.length > 0 && (
@@ -152,28 +212,46 @@ export function ArticleDetail({ slug }: Props) {
 
       <div className="articleLayout">
         <article
+          ref={bodyRef}
           className="articleBody"
-          // dangerouslySetInnerHTML 的输入完全来自我们的 Markdown 渲染器；渲染器已 escapeHtml
           dangerouslySetInnerHTML={{ __html: rendered.html }}
         />
         <aside className="articleAside">
+          {/* 目录（带滚动高亮） */}
           {rendered.headings.length > 0 && (
-            <div className="articleToc">
-              <h4>目录</h4>
+            <nav className="articleToc" aria-label="文章目录">
+              <h4>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" />
+                  <line x1="8" y1="18" x2="21" y2="18" /><line x1="3" y1="6" x2="3.01" y2="6" />
+                  <line x1="3" y1="12" x2="3.01" y2="12" /><line x1="3" y1="18" x2="3.01" y2="18" />
+                </svg>
+                目录
+              </h4>
               <ul>
                 {rendered.headings
                   .filter(h => h.level <= 3)
                   .map(h => (
-                    <li key={h.slug} className={`lvl-${h.level}`}>
+                    <li
+                      key={h.slug}
+                      className={`lvl-${h.level}${h.slug === activeHeadingId ? " active" : ""}`}
+                    >
                       <a href={`#${h.slug}`}>{h.text}</a>
                     </li>
                   ))}
               </ul>
-            </div>
+            </nav>
           )}
+
+          {/* 相关阅读 */}
           {related.length > 0 && (
             <div className="articleRelated">
-              <h4>相关阅读</h4>
+              <h4>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                </svg>
+                相关阅读
+              </h4>
               <ul>
                 {related.map(item => (
                   <li key={item.id}>

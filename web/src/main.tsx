@@ -19,6 +19,7 @@ import {
 import { navigate, searchHash, useHashRoute } from "./router";
 import { ArticleDetail } from "./ArticleDetail";
 import { SearchPage } from "./SearchPage";
+import { CodeDemoPage } from "./CodeDemo";
 
 function KnowledgeAsk({ resources }: { resources: SiteResource[] }) {
   const [question, setQuestion] = useState("React 项目经验怎么总结？");
@@ -59,6 +60,16 @@ function KnowledgeAsk({ resources }: { resources: SiteResource[] }) {
         <div className="answerPanel">
           <span>{resources.length} 篇已发布内容可检索</span>
           <p>{answer?.answer ?? "这个入口会基于你在后台发布的文章、笔记和项目内容做本地检索式回答。"}</p>
+          {!!answer?.sources?.length && (
+            <div className="answerSources">
+              {answer.sources.slice(0, 4).map(item => (
+                <div key={`${item.source_type}-${item.source_id}-${item.title}`}>
+                  <strong>{item.title}</strong>
+                  <small>{item.source_type} #{item.source_id} · {Math.round(item.score * 100)}%</small>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="answerLinks">
             {answer?.matches?.map(item => (
               <a
@@ -652,6 +663,7 @@ function App() {
       )}
       {route.name === "home" && <HomePage home={home} loading={loading} />}
       {route.name === "article" && <ArticleDetail slug={route.slug} />}
+      {route.name === "demo" && <CodeDemoPage />}
       {route.name === "search" && (
         <SearchPage
           query={route.q}

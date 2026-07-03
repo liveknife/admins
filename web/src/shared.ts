@@ -103,6 +103,13 @@ export type SiteHome = {
 export type KnowledgeAnswer = {
   question: string;
   answer: string;
+  sources?: Array<{
+    source_type: string;
+    source_id: number;
+    title: string;
+    summary: string;
+    score: number;
+  }>;
   matches: SiteResource[];
   projects: SiteProject[];
 };
