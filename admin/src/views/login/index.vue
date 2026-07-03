@@ -44,7 +44,11 @@ let particles: Array<{
   vy: number;
   size: number;
   alpha: number;
+  hue: number;
+  baseX: number;
+  baseY: number;
 }> = [];
+let mousePos = { x: -9999, y: -9999 };
 let particleResize: (() => void) | undefined;
 
 const { initStorage } = useLayout();
@@ -180,6 +184,18 @@ const initParticles = () => {
   const ctx = canvas?.getContext("2d");
   if (!canvas || !ctx) return;
 
+  // 鼠标交互
+  const handleMouse = (e: MouseEvent) => {
+    mousePos.x = e.clientX;
+    mousePos.y = e.clientY;
+  };
+  const handleMouseLeave = () => {
+    mousePos.x = -9999;
+    mousePos.y = -9999;
+  };
+  window.addEventListener("mousemove", handleMouse);
+  window.addEventListener("mouseleave", handleMouseLeave);
+
   particleResize = () => {
     const dpr = window.devicePixelRatio || 1;
     canvas.width = window.innerWidth * dpr;
@@ -189,65 +205,133 @@ const initParticles = () => {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     const count = Math.min(
-      110,
-      Math.max(48, Math.floor((window.innerWidth * window.innerHeight) / 15000))
+      240,
+      Math.max(100, Math.floor((window.innerWidth * window.innerHeight) / 7000))
     );
     particles = Array.from({ length: count }, () => ({
       x: Math.random() * window.innerWidth,
       y: Math.random() * window.innerHeight,
-      vx: (Math.random() - 0.5) * 0.45,
-      vy: (Math.random() - 0.5) * 0.45,
-      size: Math.random() * 2.1 + 0.8,
-      alpha: Math.random() * 0.45 + 0.35
+      baseX: Math.random() * window.innerWidth,
+      baseY: Math.random() * window.innerHeight,
+      vx: (Math.random() - 0.5) * 0.5,
+      vy: (Math.random() - 0.5) * 0.5,
+      size: Math.random() * 2.4 + 0.6,
+      alpha: Math.random() * 0.5 + 0.35,
+      hue: Math.random() * 60 + 190
     }));
   };
 
+  let time = 0;
   const draw = () => {
+    time += 0.008;
     ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
 
+    // 渐变背景
     const gradient = ctx.createLinearGradient(
-      0,
-      0,
-      window.innerWidth,
-      window.innerHeight
+      0, 0, window.innerWidth, window.innerHeight
     );
-    gradient.addColorStop(0, "#08111f");
-    gradient.addColorStop(0.45, "#0b2445");
-    gradient.addColorStop(1, "#101827");
+    gradient.addColorStop(0, "#060d1a");
+    gradient.addColorStop(0.35, "#091a33");
+    gradient.addColorStop(0.7, "#0c2240");
+    gradient.addColorStop(1, "#081220");
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
 
+    // 动态光晕（随时间移动）
+    for (let g = 0; g < 3; g++) {
+      const gx = window.innerWidth * (0.2 + g * 0.3) + Math.sin(time + g) * 80;
+      const gy = window.innerHeight * (0.25 + g * 0.25) + Math.cos(time * 0.8 + g) * 60;
+      const glow = ctx.createRadialGradient(gx, gy, 0, gx, gy, 280);
+      const hues = [200, 170, 260];
+      glow.addColorStop(0, `hsla(${hues[g]}, 85%, 55%, 0.06)`);
+      glow.addColorStop(1, "transparent");
+      ctx.fillStyle = glow;
+      ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+    }
+
+    // 粒子更新与绘制
+    const mouseRadius = 180;
+    const mouseForce = 0.045;
+    const connectDist = 150;
+
     for (let i = 0; i < particles.length; i++) {
       const p = particles[i];
-      p.x += p.vx;
-      p.y += p.vy;
 
-      if (p.x < -20) p.x = window.innerWidth + 20;
-      if (p.x > window.innerWidth + 20) p.x = -20;
-      if (p.y < -20) p.y = window.innerHeight + 20;
-      if (p.y > window.innerHeight + 20) p.y = -20;
+      // 缓慢漂移
+      p.baseX += p.vx;
+      p.baseY += p.vy;
 
+      // 边界环绕
+      if (p.baseX < -30) p.baseX = window.innerWidth + 30;
+      if (p.baseX > window.innerWidth + 30) p.baseX = -30;
+      if (p.baseY < -30) p.baseY = window.innerHeight + 30;
+      if (p.baseY > window.innerHeight + 30) p.baseY = -30;
+
+      p.x = p.baseX;
+      p.y = p.baseY;
+
+      // 鼠标排斥/吸引交互
+      const dx = p.x - mousePos.x;
+      const dy = p.y - mousePos.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < mouseRadius && dist > 0) {
+        const force = (mouseRadius - dist) / mouseRadius;
+        const angle = Math.atan2(dy, dx);
+        p.x += Math.cos(angle) * force * force * mouseRadius * mouseForce;
+        p.y += Math.sin(angle) * force * force * mouseRadius * mouseForce;
+      }
+
+      // 呼吸效果
+      const breathe = Math.sin(time * 1.5 + i * 0.15) * 0.18 + 1;
+      const drawSize = p.size * breathe;
+
+      // 绘制粒子光晕
       ctx.beginPath();
-      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(93, 213, 255, ${p.alpha})`;
-      ctx.shadowBlur = 14;
-      ctx.shadowColor = "rgba(93, 213, 255, 0.72)";
+      ctx.arc(p.x, p.y, drawSize * 3, 0, Math.PI * 2);
+      ctx.fillStyle = `hsla(${p.hue}, 90%, 65%, ${p.alpha * 0.12})`;
+      ctx.fill();
+
+      // 绘制粒子核心
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, drawSize, 0, Math.PI * 2);
+      ctx.fillStyle = `hsla(${p.hue}, 92%, 72%, ${p.alpha})`;
+      ctx.shadowBlur = 16;
+      ctx.shadowColor = `hsla(${p.hue}, 100%, 70%, 0.75)`;
       ctx.fill();
       ctx.shadowBlur = 0;
 
+      // 粒子间连线
       for (let j = i + 1; j < particles.length; j++) {
         const next = particles[j];
-        const dx = p.x - next.x;
-        const dy = p.y - next.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        if (distance > 145) continue;
+        const ldx = p.x - next.x;
+        const ldy = p.y - next.y;
+        const ldist = Math.sqrt(ldx * ldx + ldy * ldy);
+        if (ldist > connectDist) continue;
+
+        const lineAlpha = 0.2 * (1 - ldist / connectDist);
         ctx.beginPath();
         ctx.moveTo(p.x, p.y);
         ctx.lineTo(next.x, next.y);
-        ctx.strokeStyle = `rgba(74, 144, 255, ${0.18 * (1 - distance / 145)})`;
-        ctx.lineWidth = 1;
+        const lineHue = (p.hue + next.hue) / 2;
+        ctx.strokeStyle = `hsla(${lineHue}, 80%, 62%, ${lineAlpha})`;
+        ctx.lineWidth = 0.8;
         ctx.stroke();
       }
+    }
+
+    // 鼠标周围高亮圈
+    if (mousePos.x > -1000) {
+      const ringGrad = ctx.createRadialGradient(
+        mousePos.x, mousePos.y, 0,
+        mousePos.x, mousePos.y, mouseRadius
+      );
+      ringGrad.addColorStop(0, "rgba(100, 210, 255, 0.07)");
+      ringGrad.addColorStop(0.6, "rgba(80, 160, 255, 0.03)");
+      ringGrad.addColorStop(1, "transparent");
+      ctx.beginPath();
+      ctx.arc(mousePos.x, mousePos.y, mouseRadius, 0, Math.PI * 2);
+      ctx.fillStyle = ringGrad;
+      ctx.fill();
     }
 
     animationFrame = requestAnimationFrame(draw);
@@ -255,6 +339,15 @@ const initParticles = () => {
 
   particleResize();
   window.addEventListener("resize", particleResize);
+
+  // 存储清理函数
+  const origCleanup = particleResize;
+  particleResize = () => {
+    origCleanup();
+    window.removeEventListener("mousemove", handleMouse);
+    window.removeEventListener("mouseleave", handleMouseLeave);
+  };
+
   draw();
 };
 
@@ -429,15 +522,20 @@ onBeforeUnmount(() => {
   color: #eaf6ff;
 }
 
-.particle-bg,
+.img {
+  overflow: visible !important;
+}
+
+.particle-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+}
 .aurora-layer {
   position: fixed;
   inset: 0;
   z-index: 0;
   pointer-events: none;
-}
-
-.aurora-layer {
   background:
     radial-gradient(circle at 18% 18%, rgb(43 164 255 / 34%), transparent 28%),
     radial-gradient(circle at 70% 28%, rgb(20 184 166 / 22%), transparent 30%),

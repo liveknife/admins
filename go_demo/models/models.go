@@ -59,6 +59,34 @@ type DashboardSummary struct {
 	RecentLogs          []OperationLog    `json:"recent_logs"`
 	RecentNotifications []Notification    `json:"recent_notifications"`
 	MetricTrend         []DashboardMetric `json:"metric_trend"`
+	// 系统资源监控
+	SystemResources     *SystemResource   `json:"system_resources,omitempty"`
+	// 访问来源分布（近7天）
+	SourceStats         []SourceStat      `json:"source_stats,omitempty"`
+	// 消息类型统计
+	MessageTypeStats    []MessageTypeStat  `json:"message_type_stats,omitempty"`
+}
+
+// SystemResource 系统资源使用率
+type SystemResource struct {
+	CPUUsage    float64 `json:"cpu_usage"`    // CPU 使用率 (0-100)
+	MemoryUsage float64 `json:"memory_usage"` // 内存使用率 (0-100)
+	DiskUsage   float64 `json:"disk_usage"`   // 磁盘使用率 (0-100)
+	// 24小时趋势数据（每小时一个点）
+	CPUTrend    []float64 `json:"cpu_trend"`
+	MemoryTrend []float64 `json:"memory_trend"`
+}
+
+// SourceStat 访问来源统计
+type SourceStat struct {
+	Name  string  `json:"name"`
+	Value int64   `json:"value"`
+}
+
+// MessageTypeStat 消息类型统计
+type MessageTypeStat struct {
+	Name  string `json:"name"`  // 系统消息/聊天消息/通知公告/其他消息
+	Value int64  `json:"value"`
 }
 
 type DashboardMetric struct {

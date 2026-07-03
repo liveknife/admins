@@ -1,5 +1,5 @@
 import bg from "@/assets/login/bg.png";
 import avatar from "@/assets/login/avatar.svg?component";
-import illustration from "@/assets/login/illustration.svg?component";
+import Illustration3d from "./illustration3d.vue";
 
-export { bg, avatar, illustration };
+export { bg, avatar, Illustration3d as illustration };

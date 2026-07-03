@@ -67,6 +67,18 @@ export type DashboardSummary = {
   recent_logs: OperationLog[];
   recent_notifications: Notification[];
   metric_trend: DashboardMetric[];
+  // 系统资源监控
+  system_resources?: {
+    cpu_usage: number;
+    memory_usage: number;
+    disk_usage: number;
+    cpu_trend: number[];
+    memory_trend: number[];
+  };
+  // 访问来源分布
+  source_stats?: { name: string; value: number }[];
+  // 消息类型统计
+  message_type_stats?: { name: string; value: number }[];
 };
 
 export type PermissionTreeNode = {
