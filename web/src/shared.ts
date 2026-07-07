@@ -104,11 +104,20 @@ export type KnowledgeAnswer = {
   question: string;
   answer: string;
   sources?: Array<{
+    chunk_id?: number;
+    citation_id?: number;
     source_type: string;
     source_id: number;
+    visibility?: string;
     title: string;
     summary: string;
     score: number;
+    vector_score?: number;
+    bm25_score?: number;
+    keyword_score?: number;
+    source_weight?: number;
+    rerank_score?: number;
+    threshold?: number;
     url?: string;
     snippet?: string;
     highlighted_text?: string;

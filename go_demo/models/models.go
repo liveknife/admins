@@ -352,29 +352,90 @@ type SiteKnowledgeAnswer struct {
 }
 
 type KnowledgeSource struct {
+	ChunkID         int64   `json:"chunk_id,omitempty"`
+	CitationID      int     `json:"citation_id,omitempty"`
 	SourceType      string  `json:"source_type"`
 	SourceID        int64   `json:"source_id"`
+	Visibility      string  `json:"visibility,omitempty"`
 	Title           string  `json:"title"`
 	Summary         string  `json:"summary"`
 	Score           float64 `json:"score"`
+	VectorScore     float64 `json:"vector_score,omitempty"`
+	BM25Score       float64 `json:"bm25_score,omitempty"`
+	KeywordScore    float64 `json:"keyword_score,omitempty"`
+	SourceWeight    float64 `json:"source_weight,omitempty"`
+	RerankScore     float64 `json:"rerank_score,omitempty"`
+	Threshold       float64 `json:"threshold,omitempty"`
 	URL             string  `json:"url,omitempty"`
 	Snippet         string  `json:"snippet,omitempty"`
 	HighlightedText string  `json:"highlighted_text,omitempty"`
 }
 
+type KnowledgeChunkPreview struct {
+	ID         int64          `json:"id"`
+	SourceType string         `json:"source_type"`
+	SourceID   int64          `json:"source_id"`
+	Visibility string         `json:"visibility"`
+	Title      string         `json:"title"`
+	Summary    string         `json:"summary"`
+	Content    string         `json:"content"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
+	TokenCount int            `json:"token_count"`
+	Status     string         `json:"status"`
+	CreatedAt  time.Time      `json:"created_at"`
+	UpdatedAt  time.Time      `json:"updated_at"`
+}
+
 type RAGIndexStats struct {
-	TotalChunks        int64            `json:"total_chunks"`
-	BySource           map[string]int64 `json:"by_source"`
-	TopK               int              `json:"top_k"`
-	ChatEnabled        bool             `json:"chat_enabled"`
-	VectorBackend      string           `json:"vector_backend"`
-	PGVectorAvailable  bool             `json:"pgvector_available"`
-	UpdatedAt          *time.Time       `json:"updated_at,omitempty"`
-	LatestJob          *RAGIndexJob     `json:"latest_job,omitempty"`
-	QueryCount         int64            `json:"query_count"`
-	HitCount           int64            `json:"hit_count"`
-	AverageLatencyMs   float64          `json:"average_latency_ms"`
-	AverageSourceCount float64          `json:"average_source_count"`
+	TotalChunks        int64              `json:"total_chunks"`
+	BySource           map[string]int64   `json:"by_source"`
+	ByVisibility       map[string]int64   `json:"by_visibility"`
+	TopK               int                `json:"top_k"`
+	MinScore           float64            `json:"min_score"`
+	RerankTopN         int                `json:"rerank_top_n"`
+	SourceWeights      map[string]float64 `json:"source_weights"`
+	ChatEnabled        bool               `json:"chat_enabled"`
+	StreamingEnabled   bool               `json:"streaming_enabled"`
+	VectorBackend      string             `json:"vector_backend"`
+	PGVectorAvailable  bool               `json:"pgvector_available"`
+	UpdatedAt          *time.Time         `json:"updated_at,omitempty"`
+	LatestJob          *RAGIndexJob       `json:"latest_job,omitempty"`
+	QueryCount         int64              `json:"query_count"`
+	HitCount           int64              `json:"hit_count"`
+	AverageLatencyMs   float64            `json:"average_latency_ms"`
+	AverageSourceCount float64            `json:"average_source_count"`
+	FeedbackCount      int64              `json:"feedback_count"`
+	PositiveFeedback   int64              `json:"positive_feedback"`
+	NegativeFeedback   int64              `json:"negative_feedback"`
+}
+
+type RAGEvalCase struct {
+	ID              string   `json:"id"`
+	Question        string   `json:"question"`
+	ExpectedSources []string `json:"expected_sources,omitempty"`
+	ExpectedTerms   []string `json:"expected_terms,omitempty"`
+}
+
+type RAGEvalCaseResult struct {
+	Case          RAGEvalCase       `json:"case"`
+	Matched       bool              `json:"matched"`
+	RecallHit     bool              `json:"recall_hit"`
+	AnswerQuality float64           `json:"answer_quality"`
+	TopScore      float64           `json:"top_score"`
+	LatencyMs     int64             `json:"latency_ms"`
+	Sources       []KnowledgeSource `json:"sources"`
+	Answer        string            `json:"answer"`
+}
+
+type RAGEvalRun struct {
+	Total            int                 `json:"total"`
+	Matched          int                 `json:"matched"`
+	RecallHits       int                 `json:"recall_hits"`
+	AverageTopScore  float64             `json:"average_top_score"`
+	AverageQuality   float64             `json:"average_quality"`
+	AverageLatencyMs float64             `json:"average_latency_ms"`
+	Results          []RAGEvalCaseResult `json:"results"`
+	CreatedAt        time.Time           `json:"created_at"`
 }
 
 type RAGIndexJob struct {
@@ -421,6 +482,7 @@ type UploadedDocument struct {
 	FilePath     string    `json:"file_path"`
 	MimeType     string    `json:"mime_type"`
 	FileSize     int64     `json:"file_size"`
+	Visibility   string    `json:"visibility"`
 	TextContent  string    `json:"text_content,omitempty"`
 	ChunkCount   int       `json:"chunk_count"`
 	Status       string    `json:"status"`

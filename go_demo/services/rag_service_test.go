@@ -45,8 +45,41 @@ func TestBuildSiteProjectChunks(t *testing.T) {
 	if chunks[0].SourceType != knowledgeSourceProject || chunks[0].SourceID != 7 {
 		t.Fatalf("unexpected project source: %#v", chunks[0])
 	}
+	if chunks[0].Visibility != knowledgeVisibilityPublic {
+		t.Fatalf("expected public project chunk, got %q", chunks[0].Visibility)
+	}
 	if !containsAll(chunks[0].Content, "Admin Platform", "Go,Vue,PostgreSQL") {
 		t.Fatalf("project chunk content missing expected text: %q", chunks[0].Content)
+	}
+}
+
+func TestBuildUploadedDocumentChunksVisibility(t *testing.T) {
+	chunks := buildUploadedDocumentChunks(models.UploadedDocument{
+		ID:           12,
+		OriginalName: "Runbook.md",
+		MimeType:     "text/markdown",
+		FileSize:     128,
+		Visibility:   knowledgeVisibilityInternal,
+		TextContent:  "private deployment notes",
+		Status:       "active",
+	})
+	if len(chunks) != 1 {
+		t.Fatalf("expected one document chunk, got %d", len(chunks))
+	}
+	if chunks[0].Visibility != knowledgeVisibilityInternal {
+		t.Fatalf("expected internal document chunk, got %q", chunks[0].Visibility)
+	}
+	if chunks[0].Metadata["visibility"] != knowledgeVisibilityInternal {
+		t.Fatalf("expected internal metadata, got %#v", chunks[0].Metadata)
+	}
+}
+
+func TestNormalizeVisibilityDefaultsToInternal(t *testing.T) {
+	if got := normalizeVisibility(""); got != knowledgeVisibilityInternal {
+		t.Fatalf("empty visibility should default to internal, got %q", got)
+	}
+	if got := normalizeVisibility("public"); got != knowledgeVisibilityPublic {
+		t.Fatalf("public visibility changed to %q", got)
 	}
 }
 

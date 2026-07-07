@@ -1522,6 +1522,24 @@ func (s *AdminDataService) AskSiteKnowledge(ctx context.Context, question string
 	return s.askSiteKnowledgeByKeywords(ctx, question)
 }
 
+func (s *AdminDataService) AskSiteKnowledgeStream(ctx context.Context, question string, onToken ChatTokenHandler) (*models.SiteKnowledgeAnswer, error) {
+	if s.rag != nil {
+		return s.rag.AskSiteKnowledgeStream(ctx, question, s.askSiteKnowledgeByKeywords, onToken)
+	}
+	answer, err := s.askSiteKnowledgeByKeywords(ctx, question)
+	if err != nil {
+		return nil, err
+	}
+	if onToken != nil && answer != nil {
+		for _, token := range streamTextChunks(answer.Answer, 18) {
+			if err := onToken(token); err != nil {
+				return answer, err
+			}
+		}
+	}
+	return answer, nil
+}
+
 func (s *AdminDataService) SaveRAGFeedback(ctx context.Context, queryLogID int64, question, rating, comment, ip, userAgent string) (*models.RAGFeedback, error) {
 	rating = strings.ToLower(strings.TrimSpace(rating))
 	if rating != "up" && rating != "down" {
@@ -1618,8 +1636,36 @@ func (s *AdminDataService) ListRAGQueryLogs(ctx context.Context, limit int) ([]m
 	return s.rag.ListQueryLogs(ctx, limit)
 }
 
-func (s *AdminDataService) UploadDocument(ctx context.Context, file *multipart.FileHeader) (*models.UploadedDocument, error) {
-	return NewDocumentService(s.db).Upload(ctx, file)
+func (s *AdminDataService) ListRAGFeedback(ctx context.Context, limit int, rating string) ([]models.RAGFeedback, error) {
+	if s.rag == nil {
+		return nil, fmt.Errorf("rag service is not initialized")
+	}
+	return s.rag.ListFeedback(ctx, limit, rating)
+}
+
+func (s *AdminDataService) ListRAGChunks(ctx context.Context, sourceType string, sourceID int64, limit int) ([]models.KnowledgeChunkPreview, error) {
+	if s.rag == nil {
+		return nil, fmt.Errorf("rag service is not initialized")
+	}
+	return s.rag.ListChunks(ctx, sourceType, sourceID, limit)
+}
+
+func (s *AdminDataService) SearchRAGDiagnostics(ctx context.Context, question string, includeInternal bool, topK int) ([]models.KnowledgeSource, error) {
+	if s.rag == nil {
+		return nil, fmt.Errorf("rag service is not initialized")
+	}
+	return s.rag.SearchDiagnostics(ctx, question, includeInternal, topK)
+}
+
+func (s *AdminDataService) RunRAGEval(ctx context.Context, includeInternal bool) (*models.RAGEvalRun, error) {
+	if s.rag == nil {
+		return nil, fmt.Errorf("rag service is not initialized")
+	}
+	return s.rag.RunEval(ctx, includeInternal)
+}
+
+func (s *AdminDataService) UploadDocument(ctx context.Context, file *multipart.FileHeader, visibility string) (*models.UploadedDocument, error) {
+	return NewDocumentService(s.db).UploadWithOptions(ctx, file, DocumentUploadOptions{Visibility: visibility})
 }
 
 func (s *AdminDataService) ListDocuments(ctx context.Context, page, pageSize int) ([]models.UploadedDocument, int64, error) {
@@ -1628,6 +1674,10 @@ func (s *AdminDataService) ListDocuments(ctx context.Context, page, pageSize int
 
 func (s *AdminDataService) PreviewDocument(ctx context.Context, id int64) (*models.UploadedDocument, error) {
 	return NewDocumentService(s.db).Preview(ctx, id)
+}
+
+func (s *AdminDataService) UpdateDocumentVisibility(ctx context.Context, id int64, visibility string) (*models.UploadedDocument, error) {
+	return NewDocumentService(s.db).UpdateVisibility(ctx, id, visibility)
 }
 
 func (s *AdminDataService) DeleteDocument(ctx context.Context, id int64) (int64, error) {

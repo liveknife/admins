@@ -62,6 +62,16 @@ type AskAssistantRequest struct {
 	Question string `json:"question" form:"question"`
 }
 
+type RAGDiagnosticsRequest struct {
+	Question        string `json:"question" form:"question" binding:"required"`
+	IncludeInternal bool   `json:"include_internal" form:"include_internal"`
+	TopK            int    `json:"top_k" form:"top_k"`
+}
+
+type DocumentVisibilityRequest struct {
+	Visibility string `json:"visibility" form:"visibility" binding:"required"`
+}
+
 type AIModelConfigRequest struct {
 	Name           string  `json:"name" form:"name" binding:"required"`
 	Provider       string  `json:"provider" form:"provider"`
@@ -1009,13 +1019,58 @@ func (c *AdminController) ListRAGQueryLogs(g *gin.Context) {
 	g.JSON(http.StatusOK, gin.H{"logs": logs})
 }
 
+func (c *AdminController) ListRAGFeedback(g *gin.Context) {
+	limit := parseIntDefault(g.Query("limit"), 30)
+	items, err := c.adminData.ListRAGFeedback(g.Request.Context(), limit, g.Query("rating"))
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list rag feedback"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"feedback": items})
+}
+
+func (c *AdminController) SearchRAGDiagnostics(g *gin.Context) {
+	var req RAGDiagnosticsRequest
+	if err := bindRequest(g, &req); err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	sources, err := c.adminData.SearchRAGDiagnostics(g.Request.Context(), req.Question, req.IncludeInternal, req.TopK)
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to run rag diagnostics"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"sources": sources})
+}
+
+func (c *AdminController) RunRAGEval(g *gin.Context) {
+	includeInternal := strings.EqualFold(g.Query("include_internal"), "true")
+	run, err := c.adminData.RunRAGEval(g.Request.Context(), includeInternal)
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to run rag eval"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"run": run})
+}
+
+func (c *AdminController) ListRAGChunks(g *gin.Context) {
+	sourceID := parseIntDefault(g.Query("source_id"), 0)
+	limit := parseIntDefault(g.Query("limit"), 100)
+	chunks, err := c.adminData.ListRAGChunks(g.Request.Context(), g.Query("source_type"), int64(sourceID), limit)
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list rag chunks"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"chunks": chunks})
+}
+
 func (c *AdminController) UploadDocument(g *gin.Context) {
 	fh, err := g.FormFile("file")
 	if err != nil {
 		g.JSON(http.StatusBadRequest, gin.H{"error": "missing file"})
 		return
 	}
-	item, err := c.adminData.UploadDocument(g.Request.Context(), fh)
+	item, err := c.adminData.UploadDocument(g.Request.Context(), fh, g.PostForm("visibility"))
 	if err != nil {
 		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -1045,6 +1100,38 @@ func (c *AdminController) PreviewDocument(g *gin.Context) {
 		return
 	}
 	g.JSON(http.StatusOK, gin.H{"document": item})
+}
+
+func (c *AdminController) UpdateDocumentVisibility(g *gin.Context) {
+	id, ok := parseIDParam(g, "id")
+	if !ok {
+		return
+	}
+	var req DocumentVisibilityRequest
+	if err := bindRequest(g, &req); err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	item, err := c.adminData.UpdateDocumentVisibility(g.Request.Context(), id, req.Visibility)
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update document visibility"})
+		return
+	}
+	c.logAction(g, "更新 RAG 文档可见性", "RAG 文档管理", fmt.Sprintf("document=%d visibility=%s", id, item.Visibility))
+	g.JSON(http.StatusOK, gin.H{"document": item})
+}
+
+func (c *AdminController) ListDocumentChunks(g *gin.Context) {
+	id, ok := parseIDParam(g, "id")
+	if !ok {
+		return
+	}
+	chunks, err := c.adminData.ListRAGChunks(g.Request.Context(), "uploaded_document", id, parseIntDefault(g.Query("limit"), 100))
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list document chunks"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"chunks": chunks})
 }
 
 func (c *AdminController) DeleteDocument(g *gin.Context) {
@@ -1174,19 +1261,20 @@ func (c *AdminController) PublicSiteKnowledgeStream(g *gin.Context) {
 		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	answer, err := c.adminData.AskSiteKnowledge(g.Request.Context(), knowledgeQuestionWithContext(req))
-	if err != nil {
-		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to search knowledge base"})
-		return
-	}
 	g.Header("Content-Type", "text/event-stream; charset=utf-8")
 	g.Header("Cache-Control", "no-cache")
 	g.Header("Connection", "keep-alive")
 	g.Status(http.StatusOK)
-	flushSSE(g, "meta", gin.H{"query_log_id": answer.QueryLogID})
-	for _, token := range streamTextChunks(answer.Answer, 18) {
+	flushSSE(g, "meta", gin.H{"streaming": true})
+	answer, err := c.adminData.AskSiteKnowledgeStream(g.Request.Context(), knowledgeQuestionWithContext(req), func(token string) error {
 		flushSSE(g, "token", gin.H{"content": token})
+		return nil
+	})
+	if err != nil {
+		flushSSE(g, "error", gin.H{"error": "failed to stream knowledge answer"})
+		return
 	}
+	flushSSE(g, "meta", gin.H{"query_log_id": answer.QueryLogID})
 	flushSSE(g, "sources", answer.Sources)
 	flushSSE(g, "suggestions", answer.Suggestions)
 	flushSSE(g, "done", gin.H{"answer": answer})
@@ -1241,8 +1329,11 @@ func knowledgeQuestionWithContext(req SiteKnowledgeRequest) string {
 	}
 	var parts []string
 	for _, item := range req.Context {
+		if len(parts) >= 6 {
+			break
+		}
 		role := strings.TrimSpace(item.Role)
-		content := strings.TrimSpace(item.Content)
+		content := limitControllerRunes(strings.TrimSpace(item.Content), 300)
 		if content == "" {
 			continue
 		}
@@ -1255,6 +1346,15 @@ func knowledgeQuestionWithContext(req SiteKnowledgeRequest) string {
 		return question
 	}
 	return question + "\n\n最近对话上下文：\n" + strings.Join(parts, "\n")
+	return question + "\n\n最近对话上下文：\n" + strings.Join(parts, "\n")
+}
+
+func limitControllerRunes(value string, max int) string {
+	runes := []rune(strings.TrimSpace(value))
+	if max <= 0 || len(runes) <= max {
+		return string(runes)
+	}
+	return string(runes[:max]) + "..."
 }
 
 func flushSSE(g *gin.Context, event string, payload any) {

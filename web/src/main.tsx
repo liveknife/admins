@@ -30,7 +30,7 @@ type AnswerBlock =
 function answerTitle(question: string, answer?: string) {
   const firstHeading = answer?.split(/\r?\n/).find(line => /^#{1,4}\s+/.test(line.trim()));
   if (firstHeading) return firstHeading.replace(/^#{1,4}\s+/, "").trim();
-  return question.trim() ? `\u56de\u7b54\uff1a${question.trim()}` : "\u77e5\u8bc6\u5e93\u56de\u7b54";
+  return question.trim() ? `回答：${question.trim()}` : "知识库回答";
 }
 
 function answerBlocks(markdown?: string): AnswerBlock[] {
@@ -76,7 +76,15 @@ function pushTextBlocks(text: string, blocks: AnswerBlock[]) {
   flushList();
 }
 
-function InlineMarkdown({ text }: { text: string }) {
+function scrollCitation(id: number) {
+  const target = document.getElementById(`source-${id}`);
+  if (!target) return;
+  target.scrollIntoView({ behavior: "smooth", block: "center" });
+  target.classList.add("is-target");
+  window.setTimeout(() => target.classList.remove("is-target"), 1400);
+}
+
+function InlineMarkdown({ text, onCitation }: { text: string; onCitation?: (id: number) => void }) {
   const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g).filter(Boolean);
   return (
     <>
@@ -87,13 +95,32 @@ function InlineMarkdown({ text }: { text: string }) {
         if (part.startsWith("**") && part.endsWith("**")) {
           return <strong key={index}>{part.slice(2, -2)}</strong>;
         }
-        return <React.Fragment key={index}>{part}</React.Fragment>;
+        return (
+          <React.Fragment key={index}>
+            {part.split(/(\[\d+\])/g).filter(Boolean).map((piece, pieceIndex) => {
+              const match = piece.match(/^\[(\d+)\]$/);
+              if (!match) return <React.Fragment key={pieceIndex}>{piece}</React.Fragment>;
+              const id = Number(match[1]);
+              return (
+                <button
+                  key={pieceIndex}
+                  type="button"
+                  className="citationButton"
+                  onClick={() => onCitation?.(id)}
+                  aria-label={`查看来源 ${id}`}
+                >
+                  [{id}]
+                </button>
+              );
+            })}
+          </React.Fragment>
+        );
       })}
     </>
   );
 }
 
-function AnswerContent({ answer }: { answer?: string }) {
+function AnswerContent({ answer, onCitation }: { answer?: string; onCitation?: (id: number) => void }) {
   const blocks = answerBlocks(answer);
   if (!blocks.length) {
     return <p>{"\u8fd9\u4e2a\u5165\u53e3\u4f1a\u57fa\u4e8e\u4f60\u5728\u540e\u53f0\u53d1\u5e03\u7684\u6587\u7ae0\u3001\u7b14\u8bb0\u548c\u9879\u76ee\u5185\u5bb9\u505a\u672c\u5730\u68c0\u7d22\u5f0f\u56de\u7b54\u3002"}</p>;
@@ -102,10 +129,10 @@ function AnswerContent({ answer }: { answer?: string }) {
     <div className="answerBody">
       {blocks.map((block, index) => {
         if (block.type === "heading") {
-          return <h4 key={index}><InlineMarkdown text={block.text} /></h4>;
+          return <h4 key={index}><InlineMarkdown text={block.text} onCitation={onCitation} /></h4>;
         }
         if (block.type === "list") {
-          return <ul key={index}>{block.items.map((item, itemIndex) => <li key={itemIndex}><InlineMarkdown text={item} /></li>)}</ul>;
+          return <ul key={index}>{block.items.map((item, itemIndex) => <li key={itemIndex}><InlineMarkdown text={item} onCitation={onCitation} /></li>)}</ul>;
         }
         if (block.type === "code") {
           return (
@@ -115,13 +142,139 @@ function AnswerContent({ answer }: { answer?: string }) {
             </figure>
           );
         }
-        return <p key={index}><InlineMarkdown text={block.text} /></p>;
+        return <p key={index}><InlineMarkdown text={block.text} onCitation={onCitation} /></p>;
       })}
     </div>
   );
 }
 
 function KnowledgeAsk({ resources }: { resources: SiteResource[] }) {
+  const defaultQuestions = [
+    "React 项目经验怎么总结？",
+    "这个项目的技术栈有哪些亮点？",
+    "Go 后端接口实践怎么介绍？",
+    "数据库和权限设计有什么经验？"
+  ];
+  const [question, setQuestion] = useState(defaultQuestions[0]);
+  const [answer, setAnswer] = useState<KnowledgeAnswer | null>(null);
+  const [asking, setAsking] = useState(false);
+  const prompts = answer?.suggestions?.length ? answer.suggestions.slice(0, 4) : defaultQuestions;
+  const sourceCount = answer?.sources?.length ?? 0;
+
+  const ask = async () => {
+    if (!question.trim()) return;
+    setAsking(true);
+    try {
+      const res = await fetch(`${apiBase}/api/v1/site/knowledge`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question })
+      });
+      const data = await res.json();
+      setAnswer(data.answer ?? null);
+    } finally {
+      setAsking(false);
+    }
+  };
+
+  return (
+    <section id="ask" className="section askSection">
+      <div className="sectionHead">
+        <span>Knowledge Base</span>
+        <h2>问我的知识库</h2>
+      </div>
+      <div className="askPanel">
+        <div className="askInputCard">
+          <div className="askInputHead">
+            <span>Ask</span>
+            <strong>输入问题</strong>
+          </div>
+          <textarea
+            value={question}
+            onChange={event => setQuestion(event.target.value)}
+            placeholder="问 React、Go、数据库、项目经验..."
+          />
+          <div className="askActions">
+            <button onClick={ask} disabled={asking}>{asking ? "检索中..." : "提问"}</button>
+            <span>{sourceCount > 0 ? `已命中 ${sourceCount} 个来源` : `${resources.length} 篇内容可检索`}</span>
+          </div>
+          <div className="askQuick">
+            <span>建议问题</span>
+            <div>
+              {prompts.map(item => (
+                <button
+                  key={item}
+                  type="button"
+                  onClick={() => setQuestion(item)}
+                  disabled={asking}
+                >
+                  {item}
+                </button>
+              ))}
+            </div>
+          </div>
+          {!!answer?.sources?.length && (
+            <div className="askTrace">
+              <span>最近命中</span>
+              {answer.sources.slice(0, 3).map(item => (
+                <small key={`${item.source_type}-${item.source_id}-${item.title}`}>
+                  {item.title} · {Math.round(item.score * 100)}%
+                </small>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="answerPanel">
+          <div className="answerReader">
+            <div className="answerHeader">
+              <span>{resources.length} 篇已发布内容可检索</span>
+              <h3>{answerTitle(question, answer?.answer)}</h3>
+            </div>
+            <AnswerContent answer={answer?.answer} onCitation={scrollCitation} />
+            {!!answer?.sources?.length && (
+              <div className="answerSources">
+                {answer.sources.slice(0, 4).map((item, index) => (
+                  <div id={`source-${item.citation_id || index + 1}`} key={`${item.chunk_id || item.source_id}-${item.title}`}>
+                    {item.url ? (
+                      <a href={item.url} target={item.url.startsWith("http") ? "_blank" : undefined} rel="noreferrer">
+                        [{item.citation_id || index + 1}] {item.title}
+                      </a>
+                    ) : (
+                      <strong>[{item.citation_id || index + 1}] {item.title}</strong>
+                    )}
+                    <small>{item.source_type} #{item.source_id} · {Math.round(item.score * 100)}%</small>
+                    {item.highlighted_text && (
+                      <p dangerouslySetInnerHTML={{ __html: item.highlighted_text }} />
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="answerLinks">
+              {answer?.matches?.map(item => (
+                <a
+                  key={item.id}
+                  href={articleRouteHash(item)}
+                  onClick={event => {
+                    event.preventDefault();
+                    navigate(articleRouteHash(item));
+                  }}
+                >
+                  {item.title}
+                </a>
+              ))}
+              {answer?.projects?.map(item => (
+                <a key={`p-${item.id}`} href={item.demo_url || item.repo_url || "#"} target="_blank" rel="noreferrer">{item.name}</a>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function LegacyKnowledgeAsk({ resources }: { resources: SiteResource[] }) {
   const [question, setQuestion] = useState("React 项目经验怎么总结？");
   const [answer, setAnswer] = useState<KnowledgeAnswer | null>(null);
   const [asking, setAsking] = useState(false);
@@ -312,7 +465,7 @@ function AskPage() {
               <article key={item.id} className={`chatBubble ${item.role}`}>
                 <div className="bubbleAvatar">{item.role === "user" ? "You" : "AI"}</div>
                 <div className="bubbleBody">
-                  {item.content ? <AnswerContent answer={item.content} /> : <div className="typingDots"><i /><i /><i /></div>}
+                  {item.content ? <AnswerContent answer={item.content} onCitation={scrollCitation} /> : <div className="typingDots"><i /><i /><i /></div>}
                   {!!item.sources?.length && <SourceCards sources={item.sources} />}
                   {item.role === "assistant" && item.content && (
                     <div className="bubbleActions">
@@ -346,9 +499,9 @@ function SourceCards({ sources }: { sources: NonNullable<KnowledgeAnswer["source
       <button type="button" onClick={() => setOpen(value => !value)}>{open ? "Hide sources" : "Show sources"} ({sources.length})</button>
       {open && (
         <div className="answerSources">
-          {sources.slice(0, 4).map(item => (
-            <div key={`${item.source_type}-${item.source_id}-${item.title}`}>
-              {item.url ? <a href={item.url}>{item.title}</a> : <strong>{item.title}</strong>}
+          {sources.slice(0, 4).map((item, index) => (
+            <div id={`source-${item.citation_id || index + 1}`} key={`${item.chunk_id || item.source_id}-${item.title}`}>
+              {item.url ? <a href={item.url}>[{item.citation_id || index + 1}] {item.title}</a> : <strong>[{item.citation_id || index + 1}] {item.title}</strong>}
               <small>{item.source_type} #{item.source_id} - {Math.round(item.score * 100)}%</small>
               {item.highlighted_text && <p dangerouslySetInnerHTML={{ __html: item.highlighted_text }} />}
             </div>

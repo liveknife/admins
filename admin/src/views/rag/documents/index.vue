@@ -4,10 +4,13 @@ import dayjs from "dayjs";
 import { ElMessageBox, type UploadRequestOptions } from "element-plus";
 import {
   deleteDocument,
+  getDocumentChunks,
   getUploadedDocuments,
   previewDocument,
   rebuildDocument,
+  updateDocumentVisibility,
   uploadDocument,
+  type KnowledgeChunkPreview,
   type UploadedDocument
 } from "@/api/admin";
 import { message } from "@/utils/message";
@@ -17,9 +20,16 @@ defineOptions({ name: "RAGDocuments" });
 const loading = ref(false);
 const uploading = ref(false);
 const rebuildingId = ref<number>();
+const switchingId = ref<number>();
 const previewVisible = ref(false);
 const previewLoading = ref(false);
 const previewItem = ref<UploadedDocument>();
+const chunkVisible = ref(false);
+const chunkLoading = ref(false);
+const chunkDocument = ref<UploadedDocument>();
+const chunks = ref<KnowledgeChunkPreview[]>([]);
+const activeChunk = ref<KnowledgeChunkPreview>();
+const uploadVisibility = ref("internal");
 const documents = ref<UploadedDocument[]>([]);
 const total = ref(0);
 const page = ref(1);
@@ -28,15 +38,15 @@ const pageSize = ref(10);
 const activeCount = computed(
   () => documents.value.filter(item => item.status === "active").length
 );
-const failedCount = computed(
-  () => documents.value.filter(item => item.status === "failed").length
+const publicCount = computed(
+  () => documents.value.filter(item => item.visibility === "public").length
 );
 const totalChunks = computed(() =>
   documents.value.reduce((sum, item) => sum + (item.chunk_count || 0), 0)
 );
 
 const timeText = (value?: string) =>
-  value ? dayjs(value).format("YYYY-MM-DD HH:mm:ss") : "-";
+  value ? dayjs(value).format("YYYY-MM-DD HH:mm") : "-";
 
 const fileSizeText = (size = 0) => {
   if (size >= 1024 * 1024) return `${(size / 1024 / 1024).toFixed(2)} MB`;
@@ -55,6 +65,9 @@ const statusText = (status: string) => {
   if (status === "failed") return "失败";
   return status || "未知";
 };
+
+const visibilityText = (value: string) =>
+  value === "public" ? "Public" : "Internal";
 
 const loadDocuments = async () => {
   loading.value = true;
@@ -76,13 +89,14 @@ const handleUpload = async (options: UploadRequestOptions) => {
   const file = options.file as File;
   uploading.value = true;
   try {
-    const res = await uploadDocument(file);
+    const res = await uploadDocument(file, uploadVisibility.value);
     options.onSuccess?.(res);
     message("文档已上传并写入 RAG 索引", { type: "success" });
     page.value = 1;
     await loadDocuments();
   } catch (error: any) {
-    const errorMessage = error?.response?.data?.error || error?.message || "上传失败";
+    const errorMessage =
+      error?.response?.data?.error || error?.message || "上传失败";
     options.onError?.(error);
     message(errorMessage, { type: "error" });
   } finally {
@@ -104,6 +118,23 @@ const showPreview = async (row: UploadedDocument) => {
   }
 };
 
+const showChunks = async (row: UploadedDocument) => {
+  chunkVisible.value = true;
+  chunkLoading.value = true;
+  chunkDocument.value = row;
+  chunks.value = [];
+  activeChunk.value = undefined;
+  try {
+    const res = await getDocumentChunks(row.id, 200);
+    chunks.value = res.chunks ?? [];
+    activeChunk.value = chunks.value[0];
+  } catch {
+    message("chunk 预览加载失败", { type: "error" });
+  } finally {
+    chunkLoading.value = false;
+  }
+};
+
 const submitRebuild = async (row: UploadedDocument) => {
   rebuildingId.value = row.id;
   try {
@@ -114,6 +145,21 @@ const submitRebuild = async (row: UploadedDocument) => {
     message("文档索引重建失败", { type: "error" });
   } finally {
     rebuildingId.value = undefined;
+  }
+};
+
+const changeVisibility = async (row: UploadedDocument, value: string) => {
+  const previous = row.visibility;
+  switchingId.value = row.id;
+  try {
+    const res = await updateDocumentVisibility(row.id, value);
+    Object.assign(row, res.document);
+    message(`已切换为 ${visibilityText(value)}`, { type: "success" });
+  } catch {
+    row.visibility = previous;
+    message("可见性切换失败", { type: "error" });
+  } finally {
+    switchingId.value = undefined;
   }
 };
 
@@ -151,8 +197,8 @@ onMounted(loadDocuments);
     <section class="document-head">
       <div>
         <p class="eyebrow">Knowledge files</p>
-        <h2>文档管理</h2>
-        <p>上传 PDF、Markdown、TXT 文档，解析文本后写入 RAG 知识索引。</p>
+        <h2>RAG 文档管理</h2>
+        <p>管理上传文档、公开范围和索引片段，排查官网问答能否命中正确资料。</p>
       </div>
       <el-button @click="loadDocuments">
         <IconifyIconOnline icon="ri:refresh-line" />
@@ -162,7 +208,14 @@ onMounted(loadDocuments);
 
     <section class="document-layout">
       <aside class="side-panel">
-        <div class="upload-box">
+        <div class="upload-card">
+          <div class="upload-mode">
+            <span>上传范围</span>
+            <el-radio-group v-model="uploadVisibility" size="small">
+              <el-radio-button label="internal">Internal</el-radio-button>
+              <el-radio-button label="public">Public</el-radio-button>
+            </el-radio-group>
+          </div>
           <el-upload
             drag
             action="#"
@@ -173,28 +226,28 @@ onMounted(loadDocuments);
           >
             <IconifyIconOnline icon="ri:file-upload-line" class="upload-icon" />
             <strong>{{ uploading ? "正在上传..." : "拖拽文档到这里" }}</strong>
-            <span>支持 PDF / MD / TXT，单个文件不超过 20MB</span>
+            <span>PDF / Markdown / TXT，单文件 20MB 以内</span>
           </el-upload>
         </div>
 
         <div class="summary-grid">
           <div>
-            <span>当前页已入库</span>
+            <span>已入库</span>
             <strong>{{ activeCount }}</strong>
           </div>
           <div>
-            <span>当前页失败</span>
-            <strong>{{ failedCount }}</strong>
+            <span>Public</span>
+            <strong>{{ publicCount }}</strong>
           </div>
           <div>
-            <span>当前页片段</span>
+            <span>Chunks</span>
             <strong>{{ totalChunks }}</strong>
           </div>
         </div>
 
         <div class="note-panel">
-          <h3>解析说明</h3>
-          <p>Markdown 和 TXT 会直接提取全文。PDF 当前采用轻量文本提取，扫描件或复杂排版 PDF 可能需要转成文本版后重新上传。</p>
+          <h3>范围说明</h3>
+          <p>Public 会进入官网公开问答；Internal 只允许后台 AI 助手检索。切换范围会同步重建该文档的 chunk。</p>
         </div>
       </aside>
 
@@ -207,19 +260,30 @@ onMounted(loadDocuments);
         </div>
 
         <el-table :data="documents" stripe>
-          <el-table-column label="文档" min-width="260" show-overflow-tooltip>
+          <el-table-column label="文档" min-width="280" show-overflow-tooltip>
             <template #default="{ row }">
               <div class="doc-name">
                 <IconifyIconOnline icon="ri:file-text-line" />
                 <div>
                   <strong>{{ row.original_name }}</strong>
-                  <span>{{ row.mime_type || "unknown" }}</span>
+                  <span>{{ row.mime_type || "unknown" }} · {{ fileSizeText(row.file_size) }}</span>
                 </div>
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="大小" width="110">
-            <template #default="{ row }">{{ fileSizeText(row.file_size) }}</template>
+          <el-table-column label="范围" width="150">
+            <template #default="{ row }">
+              <el-switch
+                v-model="row.visibility"
+                :loading="switchingId === row.id"
+                active-value="public"
+                inactive-value="internal"
+                active-text="Public"
+                inactive-text="Internal"
+                inline-prompt
+                @change="value => changeVisibility(row, String(value))"
+              />
+            </template>
           </el-table-column>
           <el-table-column label="片段" width="90" prop="chunk_count" />
           <el-table-column label="状态" width="110">
@@ -229,15 +293,16 @@ onMounted(loadDocuments);
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="更新时间" width="180">
+          <el-table-column label="更新时间" width="160">
             <template #default="{ row }">{{ timeText(row.updated_at) }}</template>
           </el-table-column>
-          <el-table-column label="失败原因" min-width="180" show-overflow-tooltip>
+          <el-table-column label="错误" min-width="180" show-overflow-tooltip>
             <template #default="{ row }">{{ row.error_message || "-" }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="220" fixed="right">
+          <el-table-column label="操作" width="270" fixed="right">
             <template #default="{ row }">
-              <el-button size="small" @click="showPreview(row)">预览</el-button>
+              <el-button size="small" @click="showPreview(row)">原文</el-button>
+              <el-button size="small" @click="showChunks(row)">Chunks</el-button>
               <el-button
                 size="small"
                 :loading="rebuildingId === row.id"
@@ -267,7 +332,7 @@ onMounted(loadDocuments);
       </main>
     </section>
 
-    <el-drawer v-model="previewVisible" size="52%" title="文档预览">
+    <el-drawer v-model="previewVisible" size="52%" title="文档原文">
       <div v-loading="previewLoading" class="preview-panel">
         <template v-if="previewItem">
           <div class="preview-meta">
@@ -281,6 +346,41 @@ onMounted(loadDocuments);
           </div>
           <pre>{{ previewItem.text_content || "暂无可预览文本" }}</pre>
         </template>
+      </div>
+    </el-drawer>
+
+    <el-drawer v-model="chunkVisible" size="64%" title="Chunk 预览">
+      <div v-loading="chunkLoading" class="chunk-layout">
+        <aside class="chunk-list">
+          <div class="chunk-doc">
+            <strong>{{ chunkDocument?.original_name }}</strong>
+            <span>{{ chunks.length }} chunks</span>
+          </div>
+          <button
+            v-for="item in chunks"
+            :key="item.id"
+            type="button"
+            :class="{ active: activeChunk?.id === item.id }"
+            @click="activeChunk = item"
+          >
+            <strong>#{{ item.id }} {{ item.title }}</strong>
+            <span>{{ item.token_count }} tokens · {{ item.visibility }}</span>
+          </button>
+          <el-empty v-if="!chunks.length" description="暂无 chunk" />
+        </aside>
+        <main class="chunk-reader">
+          <template v-if="activeChunk">
+            <div class="chunk-reader-head">
+              <div>
+                <h3>{{ activeChunk.title }}</h3>
+                <span>{{ activeChunk.source_type }} #{{ activeChunk.source_id }}</span>
+              </div>
+              <el-tag effect="light">{{ activeChunk.visibility }}</el-tag>
+            </div>
+            <pre>{{ activeChunk.content }}</pre>
+          </template>
+          <el-empty v-else description="选择左侧 chunk 查看内容" />
+        </main>
       </div>
     </el-drawer>
   </div>
@@ -333,7 +433,7 @@ onMounted(loadDocuments);
 .document-layout {
   display: grid;
   align-items: start;
-  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
   gap: 16px;
 }
 
@@ -348,16 +448,29 @@ onMounted(loadDocuments);
   gap: 16px;
 }
 
-.upload-box :deep(.el-upload),
-.upload-box :deep(.el-upload-dragger) {
+.upload-card {
+  display: grid;
+  gap: 12px;
+}
+
+.upload-mode {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--app-text-secondary);
+}
+
+.upload-card :deep(.el-upload),
+.upload-card :deep(.el-upload-dragger) {
   width: 100%;
 }
 
-.upload-box :deep(.el-upload-dragger) {
+.upload-card :deep(.el-upload-dragger) {
   display: grid;
   place-items: center;
   gap: 8px;
-  min-height: 190px;
+  min-height: 178px;
   border-radius: 8px;
 }
 
@@ -366,16 +479,18 @@ onMounted(loadDocuments);
   font-size: 34px;
 }
 
-.upload-box strong {
+.upload-card strong {
   color: var(--app-text);
   font-size: 16px;
 }
 
-.upload-box span,
+.upload-card span,
 .summary-grid span,
 .panel-title span,
 .doc-name span,
-.note-panel p {
+.note-panel p,
+.chunk-list span,
+.chunk-reader-head span {
   color: var(--app-text-secondary);
 }
 
@@ -388,7 +503,7 @@ onMounted(loadDocuments);
 .summary-grid > div {
   display: grid;
   gap: 8px;
-  min-height: 84px;
+  min-height: 78px;
   padding: 12px;
   background: var(--app-surface-soft);
   border: 1px solid var(--app-border);
@@ -414,7 +529,9 @@ onMounted(loadDocuments);
   line-height: 1.7;
 }
 
-.panel-title {
+.panel-title,
+.preview-meta,
+.chunk-reader-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -457,15 +574,8 @@ onMounted(loadDocuments);
   min-height: 280px;
 }
 
-.preview-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 14px;
-}
-
-.preview-meta h3 {
+.preview-meta h3,
+.chunk-reader-head h3 {
   min-width: 0;
   margin: 0;
   overflow-wrap: anywhere;
@@ -481,9 +591,8 @@ onMounted(loadDocuments);
   border-radius: 8px;
 }
 
-.preview-panel pre {
-  min-height: 360px;
-  max-height: calc(100vh - 220px);
+.preview-panel pre,
+.chunk-reader pre {
   padding: 16px;
   margin: 0;
   overflow: auto;
@@ -496,6 +605,58 @@ onMounted(loadDocuments);
   border-radius: 8px;
 }
 
+.preview-panel pre {
+  min-height: 360px;
+  max-height: calc(100vh - 220px);
+}
+
+.chunk-layout {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 16px;
+  min-height: calc(100vh - 120px);
+}
+
+.chunk-list {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.chunk-doc,
+.chunk-list button {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  text-align: left;
+  background: var(--app-surface-soft);
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+}
+
+.chunk-list button {
+  cursor: pointer;
+}
+
+.chunk-list button.active {
+  border-color: var(--app-primary);
+  box-shadow: inset 3px 0 0 var(--app-primary);
+}
+
+.chunk-list strong {
+  color: var(--app-text);
+  overflow-wrap: anywhere;
+}
+
+.chunk-reader {
+  min-width: 0;
+}
+
+.chunk-reader pre {
+  max-height: calc(100vh - 210px);
+}
+
 @media (max-width: 1100px) {
   .document-head,
   .panel-title {
@@ -503,7 +664,8 @@ onMounted(loadDocuments);
     flex-direction: column;
   }
 
-  .document-layout {
+  .document-layout,
+  .chunk-layout {
     grid-template-columns: 1fr;
   }
 }

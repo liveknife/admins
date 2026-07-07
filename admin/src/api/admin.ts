@@ -98,11 +98,20 @@ export type RolePermissionPreview = {
 };
 
 export type KnowledgeSource = {
+  chunk_id?: number;
+  citation_id?: number;
   source_type: string;
   source_id: number;
+  visibility?: string;
   title: string;
   summary: string;
   score: number;
+  vector_score?: number;
+  bm25_score?: number;
+  keyword_score?: number;
+  source_weight?: number;
+  rerank_score?: number;
+  threshold?: number;
   url?: string;
   snippet?: string;
   highlighted_text?: string;
@@ -120,8 +129,13 @@ export type AIAssistantResult = {
 export type RAGIndexStats = {
   total_chunks: number;
   by_source: Record<string, number>;
+  by_visibility: Record<string, number>;
   top_k: number;
+  min_score: number;
+  rerank_top_n: number;
+  source_weights: Record<string, number>;
   chat_enabled: boolean;
+  streaming_enabled: boolean;
   vector_backend: string;
   pgvector_available: boolean;
   updated_at?: string;
@@ -130,6 +144,9 @@ export type RAGIndexStats = {
   hit_count: number;
   average_latency_ms: number;
   average_source_count: number;
+  feedback_count: number;
+  positive_feedback: number;
+  negative_feedback: number;
 };
 
 export type RAGIndexJob = {
@@ -158,6 +175,61 @@ export type RAGQueryLog = {
   created_at: string;
 };
 
+export type RAGFeedback = {
+  id: number;
+  query_log_id: number;
+  question: string;
+  rating: string;
+  comment: string;
+  ip_address?: string;
+  user_agent?: string;
+  created_at: string;
+};
+
+export type KnowledgeChunkPreview = {
+  id: number;
+  source_type: string;
+  source_id: number;
+  visibility: string;
+  title: string;
+  summary: string;
+  content: string;
+  metadata?: Record<string, any>;
+  token_count: number;
+  status: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RAGEvalCase = {
+  id: string;
+  question: string;
+  expected_sources?: string[];
+  expected_terms?: string[];
+};
+
+export type RAGEvalCaseResult = {
+  case: RAGEvalCase;
+  matched: boolean;
+  recall_hit: boolean;
+  answer_quality: number;
+  top_score: number;
+  latency_ms: number;
+  sources: KnowledgeSource[];
+  answer: string;
+};
+
+export type RAGEvalRun = {
+  total: number;
+  matched: number;
+  recall_hits: number;
+  average_top_score: number;
+  average_quality: number;
+  average_latency_ms: number;
+  results: RAGEvalCaseResult[];
+  created_at: string;
+};
+
 export type UploadedDocument = {
   id: number;
   original_name: string;
@@ -165,6 +237,7 @@ export type UploadedDocument = {
   file_path: string;
   mime_type: string;
   file_size: number;
+  visibility: string;
   text_content: string;
   chunk_count: number;
   status: string;
@@ -716,6 +789,46 @@ export const getRAGQueryLogs = (limit = 30) => {
   );
 };
 
+export const getRAGFeedback = (params?: { limit?: number; rating?: string }) => {
+  return http.request<{ feedback: RAGFeedback[] }>(
+    "get",
+    "/api/v1/admin/ai/rag/feedback",
+    { params }
+  );
+};
+
+export const searchRAGDiagnostics = (data: {
+  question: string;
+  include_internal?: boolean;
+  top_k?: number;
+}) => {
+  return http.request<{ sources: KnowledgeSource[] }>(
+    "post",
+    "/api/v1/admin/ai/rag/diagnostics",
+    { data }
+  );
+};
+
+export const runRAGEval = (includeInternal = true) => {
+  return http.request<{ run: RAGEvalRun }>(
+    "post",
+    "/api/v1/admin/ai/rag/evals/run",
+    { params: { include_internal: includeInternal } }
+  );
+};
+
+export const getRAGChunks = (params?: {
+  source_type?: string;
+  source_id?: number;
+  limit?: number;
+}) => {
+  return http.request<{ chunks: KnowledgeChunkPreview[] }>(
+    "get",
+    "/api/v1/admin/ai/rag/chunks",
+    { params }
+  );
+};
+
 export const getUploadedDocuments = (params?: PageParams) => {
   return http.request<PagedResult<"documents", UploadedDocument>>(
     "get",
@@ -724,9 +837,10 @@ export const getUploadedDocuments = (params?: PageParams) => {
   );
 };
 
-export const uploadDocument = (file: File) => {
+export const uploadDocument = (file: File, visibility = "internal") => {
   const formData = new FormData();
   formData.append("file", file);
+  formData.append("visibility", visibility);
   return http.request<{ document: UploadedDocument }>(
     "post",
     "/api/v1/admin/documents/upload",
@@ -743,6 +857,22 @@ export const previewDocument = (id: number) => {
   return http.request<{ document: UploadedDocument }>(
     "get",
     `/api/v1/admin/documents/${id}/preview`
+  );
+};
+
+export const getDocumentChunks = (id: number, limit = 100) => {
+  return http.request<{ chunks: KnowledgeChunkPreview[] }>(
+    "get",
+    `/api/v1/admin/documents/${id}/chunks`,
+    { params: { limit } }
+  );
+};
+
+export const updateDocumentVisibility = (id: number, visibility: string) => {
+  return http.request<{ document: UploadedDocument }>(
+    "put",
+    `/api/v1/admin/documents/${id}/visibility`,
+    { data: { visibility } }
   );
 };
 

@@ -318,8 +318,8 @@ canvas {
 .askPanel,
 .messageLayout {
   display: grid;
-  grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
-  gap: 18px;
+  grid-template-columns: minmax(320px, 380px) minmax(0, 1fr);
+  gap: 20px;
   align-items: start;
 }
 
@@ -333,11 +333,37 @@ canvas {
 }
 
 .askPanel > div {
-  padding: 24px;
+  padding: 22px;
 }
 
 .askInputCard {
   align-self: start;
+  position: sticky;
+  top: 88px;
+  display: grid;
+  gap: 16px;
+}
+
+.askInputHead,
+.askQuick,
+.askTrace {
+  display: grid;
+  gap: 8px;
+}
+
+.askInputHead span,
+.askQuick > span,
+.askTrace > span {
+  color: #f0abfc;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+
+.askInputHead strong {
+  color: #eef5ff;
+  font-size: 18px;
 }
 
 .askPanel textarea,
@@ -353,12 +379,24 @@ canvas {
 
 .askPanel textarea,
 .messageForm textarea {
-  min-height: 150px;
+  min-height: 132px;
   padding: 14px;
   resize: vertical;
 }
 
-.askPanel button,
+.askActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.askActions span {
+  color: #8ea0bd;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.askActions button,
 .messageForm button {
   margin-top: 14px;
   padding: 12px 18px;
@@ -369,13 +407,59 @@ canvas {
   cursor: pointer;
 }
 
+.askActions button {
+  flex: 0 0 auto;
+  margin-top: 0;
+}
+
 .askPanel button:disabled {
   cursor: wait;
   opacity: .65;
 }
 
+.askQuick div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.askQuick button {
+  margin: 0;
+  padding: 8px 10px;
+  color: #cfe0f7;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .055);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1.35;
+  text-align: left;
+}
+
+.askQuick button:hover {
+  color: #eef5ff;
+  border-color: rgba(167, 243, 208, .35);
+  background: rgba(167, 243, 208, .08);
+}
+
+.askTrace small {
+  display: block;
+  color: #9fb0c9;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
 .answerPanel {
   min-width: 0;
+  max-height: min(760px, calc(100vh - 160px));
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(167, 243, 208, .4) rgba(255, 255, 255, .06);
+}
+
+.answerReader {
+  max-width: 920px;
+  padding-right: 6px;
 }
 
 .answerPanel > span,
@@ -446,6 +530,23 @@ canvas {
   font-size: .92em;
 }
 
+.citationButton {
+  display: inline-grid;
+  place-items: center;
+  min-width: 26px;
+  min-height: 22px;
+  margin: 0 2px;
+  padding: 0 5px;
+  color: #071016;
+  cursor: pointer;
+  border: 0;
+  border-radius: 6px;
+  background: #a7f3d0;
+  font: inherit;
+  font-size: .82em;
+  font-weight: 800;
+}
+
 .answerCode {
   overflow: hidden;
   border: 1px solid rgba(125, 211, 252, .18);
@@ -490,6 +591,13 @@ canvas {
   border: 1px solid rgba(255, 255, 255, .12);
   border-radius: 12px;
   background: rgba(255, 255, 255, .045);
+  transition: border-color .2s ease, box-shadow .2s ease, background .2s ease;
+}
+
+.answerSources div.is-target {
+  border-color: rgba(167, 243, 208, .72);
+  background: rgba(167, 243, 208, .09);
+  box-shadow: 0 0 0 3px rgba(167, 243, 208, .14);
 }
 
 .answerSources strong,
@@ -1385,8 +1493,17 @@ canvas {
   .galaxyPanel,
   .demoGrid,
   .stackGrid,
-  .timelineRow {
+  .timelineRow,
+  .askPanel {
     grid-template-columns: 1fr;
+  }
+
+  .askInputCard {
+    position: static;
+  }
+
+  .answerPanel {
+    max-height: none;
   }
 
   .orbit {

@@ -20,12 +20,15 @@ import (
 )
 
 const (
-	knowledgeSourceResource = "site_resource"
-	knowledgeSourceProject  = "site_project"
-	knowledgeSourceTech     = "site_tech_stack"
-	knowledgeSourceTimeline = "site_timeline"
-	knowledgeSourceDocument = "uploaded_document"
-	defaultRAGTopK          = 6
+	knowledgeSourceResource     = "site_resource"
+	knowledgeSourceProject      = "site_project"
+	knowledgeSourceTech         = "site_tech_stack"
+	knowledgeSourceTimeline     = "site_timeline"
+	knowledgeSourceDocument     = "uploaded_document"
+	knowledgeVisibilityPublic   = "public"
+	knowledgeVisibilityInternal = "internal"
+	defaultRAGTopK              = 6
+	defaultRAGMinScore          = 0.08
 )
 
 type RAGService struct {
@@ -37,6 +40,7 @@ type RAGService struct {
 type knowledgeChunkInput struct {
 	SourceType string
 	SourceID   int64
+	Visibility string
 	Title      string
 	Summary    string
 	Content    string
@@ -44,15 +48,21 @@ type knowledgeChunkInput struct {
 }
 
 type knowledgeChunk struct {
-	ID         int64
-	SourceType string
-	SourceID   int64
-	Title      string
-	Summary    string
-	Content    string
-	Metadata   map[string]any
-	Embedding  []float64
-	Score      float64
+	ID           int64
+	SourceType   string
+	SourceID     int64
+	Visibility   string
+	Title        string
+	Summary      string
+	Content      string
+	Metadata     map[string]any
+	Embedding    []float64
+	Score        float64
+	VectorScore  float64
+	BM25Score    float64
+	KeywordScore float64
+	SourceWeight float64
+	RerankScore  float64
 }
 
 func NewRAGService(db *sql.DB) *RAGService {
@@ -121,23 +131,30 @@ func (r *RAGService) DeleteSource(ctx context.Context, sourceType string, source
 func (r *RAGService) Stats(ctx context.Context) (*models.RAGIndexStats, error) {
 	stats := &models.RAGIndexStats{
 		BySource:          map[string]int64{},
+		ByVisibility:      map[string]int64{},
 		TopK:              r.top,
+		MinScore:          r.minScore(),
+		RerankTopN:        r.rerankTopN(),
+		SourceWeights:     r.sourceWeights(),
 		ChatEnabled:       r.chatEnabled(ctx),
+		StreamingEnabled:  r.streamingEnabled(ctx),
 		VectorBackend:     r.vectorBackend(),
 		PGVectorAvailable: r.pgVectorAvailable(ctx),
 	}
-	rows, err := database.QueryCtx(ctx, r.db, `SELECT source_type,COUNT(*) FROM knowledge_chunks WHERE status='active' GROUP BY source_type`)
+	rows, err := database.QueryCtx(ctx, r.db, `SELECT source_type,visibility,COUNT(*) FROM knowledge_chunks WHERE status='active' GROUP BY source_type,visibility`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var sourceType string
+		var visibility string
 		var count int64
-		if err := rows.Scan(&sourceType, &count); err != nil {
+		if err := rows.Scan(&sourceType, &visibility, &count); err != nil {
 			return nil, err
 		}
-		stats.BySource[sourceType] = count
+		stats.BySource[sourceType] += count
+		stats.ByVisibility[normalizeVisibility(visibility)] += count
 		stats.TotalChunks += count
 	}
 	if err := rows.Err(); err != nil {
@@ -156,6 +173,9 @@ func (r *RAGService) Stats(ctx context.Context) (*models.RAGIndexStats, error) {
 	}
 	_ = database.QueryRowCtx(ctx, r.db, `SELECT COUNT(*),COALESCE(SUM(CASE WHEN matched THEN 1 ELSE 0 END),0),COALESCE(AVG(latency_ms),0),COALESCE(AVG(source_count),0) FROM rag_query_logs`).Scan(
 		&stats.QueryCount, &stats.HitCount, &stats.AverageLatencyMs, &stats.AverageSourceCount,
+	)
+	_ = database.QueryRowCtx(ctx, r.db, `SELECT COUNT(*),COALESCE(SUM(CASE WHEN rating='up' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN rating='down' THEN 1 ELSE 0 END),0) FROM rag_feedback`).Scan(
+		&stats.FeedbackCount, &stats.PositiveFeedback, &stats.NegativeFeedback,
 	)
 	return stats, nil
 }
@@ -268,6 +288,128 @@ func (r *RAGService) ListQueryLogs(ctx context.Context, limit int) ([]models.RAG
 	return out, rows.Err()
 }
 
+func (r *RAGService) ListFeedback(ctx context.Context, limit int, rating string) ([]models.RAGFeedback, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 30
+	}
+	rating = strings.ToLower(strings.TrimSpace(rating))
+	query := `SELECT id,query_log_id,question,rating,comment,ip_address,user_agent,created_at FROM rag_feedback`
+	args := []any{}
+	if rating == "up" || rating == "down" || rating == "neutral" {
+		query += ` WHERE rating=$1`
+		args = append(args, rating)
+	}
+	query += ` ORDER BY id DESC LIMIT $` + strconv.Itoa(len(args)+1)
+	args = append(args, limit)
+
+	rows, err := database.QueryCtx(ctx, r.db, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]models.RAGFeedback, 0)
+	for rows.Next() {
+		var item models.RAGFeedback
+		if err := rows.Scan(&item.ID, &item.QueryLogID, &item.Question, &item.Rating, &item.Comment, &item.IPAddress, &item.UserAgent, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (r *RAGService) ListChunks(ctx context.Context, sourceType string, sourceID int64, limit int) ([]models.KnowledgeChunkPreview, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 100
+	}
+	where := "WHERE status='active'"
+	args := []any{}
+	if strings.TrimSpace(sourceType) != "" {
+		where += fmt.Sprintf(" AND source_type=$%d", len(args)+1)
+		args = append(args, strings.TrimSpace(sourceType))
+	}
+	if sourceID > 0 {
+		where += fmt.Sprintf(" AND source_id=$%d", len(args)+1)
+		args = append(args, sourceID)
+	}
+	args = append(args, limit)
+	rows, err := database.QueryCtx(ctx, r.db, `SELECT id,source_type,source_id,visibility,title,summary,content,metadata_json,token_count,status,created_at,updated_at FROM knowledge_chunks `+where+` ORDER BY source_type,source_id,id ASC LIMIT $`+strconv.Itoa(len(args)), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]models.KnowledgeChunkPreview, 0)
+	for rows.Next() {
+		var item models.KnowledgeChunkPreview
+		var rawMetadata string
+		if err := rows.Scan(&item.ID, &item.SourceType, &item.SourceID, &item.Visibility, &item.Title, &item.Summary, &item.Content, &rawMetadata, &item.TokenCount, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		item.Visibility = normalizeVisibility(item.Visibility)
+		_ = json.Unmarshal([]byte(rawMetadata), &item.Metadata)
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (r *RAGService) SearchDiagnostics(ctx context.Context, question string, includeInternal bool, topK int) ([]models.KnowledgeSource, error) {
+	_ = r.ensureInitialIndex(ctx)
+	chunks, err := r.search(ctx, question, topK, includeInternal)
+	if err != nil {
+		return nil, err
+	}
+	return chunksToSources(chunks, question), nil
+}
+
+func (r *RAGService) RunEval(ctx context.Context, includeInternal bool) (*models.RAGEvalRun, error) {
+	cases := loadRAGEvalCases()
+	run := &models.RAGEvalRun{
+		Total:     len(cases),
+		Results:   make([]models.RAGEvalCaseResult, 0, len(cases)),
+		CreatedAt: time.Now(),
+	}
+	for _, item := range cases {
+		start := time.Now()
+		chunks, err := r.search(ctx, item.Question, r.top, includeInternal)
+		if err != nil {
+			return nil, err
+		}
+		sources := chunksToSources(chunks, item.Question)
+		answer := r.extractiveAnswer(item.Question, chunks)
+		if r.chatEnabled(ctx) {
+			if generated, err := r.generateAnswer(ctx, item.Question, chunks); err == nil && strings.TrimSpace(generated) != "" {
+				answer = generated
+			}
+		}
+		result := models.RAGEvalCaseResult{
+			Case:          item,
+			Matched:       len(sources) > 0,
+			RecallHit:     evalRecallHit(item, sources),
+			AnswerQuality: evalAnswerQuality(item, answer),
+			LatencyMs:     time.Since(start).Milliseconds(),
+			Sources:       sources,
+			Answer:        answer,
+		}
+		if len(sources) > 0 {
+			result.TopScore = sources[0].Score
+			run.Matched++
+		}
+		if result.RecallHit {
+			run.RecallHits++
+		}
+		run.AverageTopScore += result.TopScore
+		run.AverageQuality += result.AnswerQuality
+		run.AverageLatencyMs += float64(result.LatencyMs)
+		run.Results = append(run.Results, result)
+	}
+	if run.Total > 0 {
+		run.AverageTopScore = math.Round(run.AverageTopScore/float64(run.Total)*10000) / 10000
+		run.AverageQuality = math.Round(run.AverageQuality/float64(run.Total)*10000) / 10000
+		run.AverageLatencyMs = math.Round(run.AverageLatencyMs/float64(run.Total)*100) / 100
+	}
+	return run, nil
+}
+
 func (r *RAGService) AskSiteKnowledge(ctx context.Context, question string, fallback func(context.Context, string) (*models.SiteKnowledgeAnswer, error)) (*models.SiteKnowledgeAnswer, error) {
 	start := time.Now()
 	question = strings.TrimSpace(question)
@@ -276,7 +418,7 @@ func (r *RAGService) AskSiteKnowledge(ctx context.Context, question string, fall
 	}
 
 	_ = r.ensureInitialIndex(ctx)
-	matches, err := r.search(ctx, question, r.top)
+	matches, err := r.search(ctx, question, r.top, false)
 	if err != nil || len(matches) == 0 {
 		if fallback != nil {
 			answer, fallbackErr := fallback(ctx, question)
@@ -312,6 +454,86 @@ func (r *RAGService) AskSiteKnowledge(ctx context.Context, question string, fall
 	}, nil
 }
 
+func (r *RAGService) AskSiteKnowledgeStream(ctx context.Context, question string, fallback func(context.Context, string) (*models.SiteKnowledgeAnswer, error), onToken ChatTokenHandler) (*models.SiteKnowledgeAnswer, error) {
+	start := time.Now()
+	question = strings.TrimSpace(question)
+	if question == "" {
+		answer := "可以问我关于 React、Go、数据库、项目经验或学习笔记的问题。"
+		if onToken != nil {
+			_ = onToken(answer)
+		}
+		return &models.SiteKnowledgeAnswer{Question: question, Answer: answer}, nil
+	}
+
+	_ = r.ensureInitialIndex(ctx)
+	matches, err := r.search(ctx, question, r.top, false)
+	if err != nil || len(matches) == 0 {
+		if fallback != nil {
+			answer, fallbackErr := fallback(ctx, question)
+			if answer != nil {
+				answer.QueryLogID = r.logQuery(ctx, question, answer.Answer, nil, false, time.Since(start), false)
+				answer.Suggestions = r.suggestQuestions(question, nil)
+				if onToken != nil {
+					for _, token := range streamTextChunks(answer.Answer, 18) {
+						if err := onToken(token); err != nil {
+							return answer, err
+						}
+					}
+				}
+			}
+			return answer, fallbackErr
+		}
+		return nil, err
+	}
+
+	resources, projects := r.sourcesToLegacyMatches(ctx, matches)
+	sources := chunksToSources(matches, question)
+	answer := ""
+	usedChat := false
+	if r.chatEnabled(ctx) {
+		req := r.answerChatRequest(question, matches)
+		if streamer, ok := r.ai.(ChatStreamingClient); ok {
+			var builder strings.Builder
+			if err := streamer.ChatStream(ctx, req, func(token string) error {
+				builder.WriteString(token)
+				if onToken != nil {
+					return onToken(token)
+				}
+				return nil
+			}); err == nil && strings.TrimSpace(builder.String()) != "" {
+				answer = strings.TrimSpace(builder.String())
+				usedChat = true
+			}
+		}
+		if answer == "" {
+			if generated, err := r.generateAnswer(ctx, question, matches); err == nil && strings.TrimSpace(generated) != "" {
+				answer = generated
+				usedChat = true
+			}
+		}
+	}
+	if answer == "" {
+		answer = r.extractiveAnswer(question, matches)
+	}
+	if !usedChat && onToken != nil {
+		for _, token := range streamTextChunks(answer, 18) {
+			if err := onToken(token); err != nil {
+				return nil, err
+			}
+		}
+	}
+	queryLogID := r.logQuery(ctx, question, answer, sources, true, time.Since(start), usedChat)
+	return &models.SiteKnowledgeAnswer{
+		Question:    question,
+		Answer:      answer,
+		Sources:     sources,
+		Matches:     resources,
+		Projects:    projects,
+		Suggestions: r.suggestQuestions(question, matches),
+		QueryLogID:  queryLogID,
+	}, nil
+}
+
 func (r *RAGService) AskAdminKnowledge(ctx context.Context, question string) (*models.AIAssistantResult, bool, error) {
 	start := time.Now()
 	question = strings.TrimSpace(question)
@@ -319,7 +541,7 @@ func (r *RAGService) AskAdminKnowledge(ctx context.Context, question string) (*m
 		return nil, false, nil
 	}
 	_ = r.ensureInitialIndex(ctx)
-	matches, err := r.search(ctx, question, r.top)
+	matches, err := r.search(ctx, question, r.top, true)
 	if err != nil {
 		return nil, false, err
 	}
@@ -345,6 +567,10 @@ func (r *RAGService) AskAdminKnowledge(ctx context.Context, question string) (*m
 		},
 		Metrics: map[string]int64{"sources": int64(len(matches))},
 		Sources: sources,
+	}
+	result.Insights = []string{
+		fmt.Sprintf("已从知识库命中 %d 个相关片段。", len(matches)),
+		"答案基于官网资源、项目、技术栈、时间线和后台上传文档生成。",
 	}
 	r.logQuery(ctx, question, answer, sources, true, time.Since(start), usedChat)
 	for _, source := range result.Sources {
@@ -381,14 +607,15 @@ func (r *RAGService) replaceChunks(ctx context.Context, sourceType string, sourc
 		metadata, _ := json.Marshal(chunk.Metadata)
 		embedding, _ := json.Marshal(embeddings[i])
 		contentHash := hashText(chunk.Content)
+		visibility := normalizeVisibility(chunk.Visibility)
 		if r.canUsePGVector(ctx, embeddings[i]) {
 			_, err = database.ExecCtx(ctx, r.db,
-				`INSERT INTO knowledge_chunks(source_type,source_id,title,summary,content,metadata_json,embedding_json,embedding_vector,content_hash,token_count,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8::vector,$9,$10,'active')`,
-				chunk.SourceType, chunk.SourceID, chunk.Title, chunk.Summary, chunk.Content, string(metadata), string(embedding), vectorLiteral(embeddings[i]), contentHash, len([]rune(chunk.Content)))
+				`INSERT INTO knowledge_chunks(source_type,source_id,visibility,title,summary,content,metadata_json,embedding_json,embedding_vector,content_hash,token_count,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::vector,$10,$11,'active')`,
+				chunk.SourceType, chunk.SourceID, visibility, chunk.Title, chunk.Summary, chunk.Content, string(metadata), string(embedding), vectorLiteral(embeddings[i]), contentHash, len([]rune(chunk.Content)))
 		} else {
 			_, err = database.ExecCtx(ctx, r.db,
-				`INSERT INTO knowledge_chunks(source_type,source_id,title,summary,content,metadata_json,embedding_json,content_hash,token_count,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'active')`,
-				chunk.SourceType, chunk.SourceID, chunk.Title, chunk.Summary, chunk.Content, string(metadata), string(embedding), contentHash, len([]rune(chunk.Content)))
+				`INSERT INTO knowledge_chunks(source_type,source_id,visibility,title,summary,content,metadata_json,embedding_json,content_hash,token_count,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'active')`,
+				chunk.SourceType, chunk.SourceID, visibility, chunk.Title, chunk.Summary, chunk.Content, string(metadata), string(embedding), contentHash, len([]rune(chunk.Content)))
 		}
 		if err != nil {
 			return err
@@ -515,7 +742,7 @@ func (r *RAGService) hasActiveChunks(ctx context.Context, sourceType string) boo
 	return err == nil && count > 0
 }
 
-func (r *RAGService) search(ctx context.Context, question string, topK int) ([]knowledgeChunk, error) {
+func (r *RAGService) search(ctx context.Context, question string, topK int, includeInternal bool) ([]knowledgeChunk, error) {
 	queryEmbedding, err := r.ai.Embed(ctx, []string{question})
 	if err != nil {
 		return nil, err
@@ -524,96 +751,222 @@ func (r *RAGService) search(ctx context.Context, question string, topK int) ([]k
 		return nil, nil
 	}
 	if r.canUsePGVector(ctx, queryEmbedding[0]) {
-		if items, err := r.searchPGVector(ctx, question, queryEmbedding[0], topK); err == nil {
+		if items, err := r.searchPGVector(ctx, question, queryEmbedding[0], topK, includeInternal); err == nil {
 			return items, nil
 		}
 	}
-	rows, err := database.QueryCtx(ctx, r.db, `SELECT id,source_type,source_id,title,summary,content,metadata_json,embedding_json FROM knowledge_chunks WHERE status='active' ORDER BY updated_at DESC LIMIT 300`)
+	visibilitySQL := `visibility='public'`
+	if includeInternal {
+		visibilitySQL = `visibility IN ('public','internal')`
+	}
+	rows, err := database.QueryCtx(ctx, r.db, `SELECT id,source_type,source_id,visibility,title,summary,content,metadata_json,embedding_json FROM knowledge_chunks WHERE status='active' AND `+visibilitySQL+` ORDER BY updated_at DESC LIMIT 300`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
 	terms := tokenizeQuery(question)
+	minScore := r.minScore()
 	items := make([]knowledgeChunk, 0)
 	for rows.Next() {
 		var item knowledgeChunk
 		var rawMetadata, rawEmbedding string
-		if err := rows.Scan(&item.ID, &item.SourceType, &item.SourceID, &item.Title, &item.Summary, &item.Content, &rawMetadata, &rawEmbedding); err != nil {
+		if err := rows.Scan(&item.ID, &item.SourceType, &item.SourceID, &item.Visibility, &item.Title, &item.Summary, &item.Content, &rawMetadata, &rawEmbedding); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(rawMetadata), &item.Metadata)
 		if json.Unmarshal([]byte(rawEmbedding), &item.Embedding) != nil || len(item.Embedding) == 0 {
 			continue
 		}
-		vectorScore := cosine(queryEmbedding[0], item.Embedding)
-		keywordScore := math.Min(float64(scoreText(strings.ToLower(item.Title+" "+item.Summary+" "+item.Content), terms))/12, 1)
-		item.Score = vectorScore*0.78 + keywordScore*0.22
-		if item.Score > 0 {
-			items = append(items, item)
-		}
-	}
-	sort.Slice(items, func(i, j int) bool { return items[i].Score > items[j].Score })
-	if topK <= 0 || topK > defaultRAGTopK*2 {
-		topK = defaultRAGTopK
-	}
-	if len(items) > topK {
-		items = items[:topK]
-	}
-	return items, rows.Err()
-}
-
-func (r *RAGService) searchPGVector(ctx context.Context, question string, embedding []float64, topK int) ([]knowledgeChunk, error) {
-	if topK <= 0 || topK > defaultRAGTopK*2 {
-		topK = defaultRAGTopK
-	}
-	rows, err := database.QueryCtx(ctx, r.db, `SELECT id,source_type,source_id,title,summary,content,metadata_json,embedding_json,(embedding_vector <=> $1::vector) AS distance FROM knowledge_chunks WHERE status='active' AND embedding_vector IS NOT NULL ORDER BY embedding_vector <=> $1::vector LIMIT $2`, vectorLiteral(embedding), topK*6)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	terms := tokenizeQuery(question)
-	items := make([]knowledgeChunk, 0)
-	for rows.Next() {
-		var item knowledgeChunk
-		var rawMetadata, rawEmbedding string
-		var distance float64
-		if err := rows.Scan(&item.ID, &item.SourceType, &item.SourceID, &item.Title, &item.Summary, &item.Content, &rawMetadata, &rawEmbedding, &distance); err != nil {
-			return nil, err
-		}
-		_ = json.Unmarshal([]byte(rawMetadata), &item.Metadata)
-		_ = json.Unmarshal([]byte(rawEmbedding), &item.Embedding)
-		vectorScore := math.Max(0, 1-distance)
-		keywordScore := math.Min(float64(scoreText(strings.ToLower(item.Title+" "+item.Summary+" "+item.Content), terms))/12, 1)
-		item.Score = vectorScore*0.82 + keywordScore*0.18
-		if item.Score > 0 {
-			items = append(items, item)
-		}
+		item.VectorScore = cosine(queryEmbedding[0], item.Embedding)
+		item.KeywordScore = keywordScore(item, terms)
+		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	sort.Slice(items, func(i, j int) bool { return items[i].Score > items[j].Score })
+	items = r.rerank(question, items)
+	filtered := items[:0]
+	for _, item := range items {
+		if item.Score >= minScore {
+			filtered = append(filtered, item)
+		}
+	}
+	items = filtered
+	if topK <= 0 || topK > defaultRAGTopK*2 {
+		topK = defaultRAGTopK
+	}
 	if len(items) > topK {
 		items = items[:topK]
 	}
 	return items, nil
 }
 
+func (r *RAGService) searchPGVector(ctx context.Context, question string, embedding []float64, topK int, includeInternal bool) ([]knowledgeChunk, error) {
+	if topK <= 0 || topK > defaultRAGTopK*2 {
+		topK = defaultRAGTopK
+	}
+	visibilitySQL := `visibility='public'`
+	if includeInternal {
+		visibilitySQL = `visibility IN ('public','internal')`
+	}
+	rows, err := database.QueryCtx(ctx, r.db, `SELECT id,source_type,source_id,visibility,title,summary,content,metadata_json,embedding_json,(embedding_vector <=> $1::vector) AS distance FROM knowledge_chunks WHERE status='active' AND `+visibilitySQL+` AND embedding_vector IS NOT NULL ORDER BY embedding_vector <=> $1::vector LIMIT $2`, vectorLiteral(embedding), topK*6)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	terms := tokenizeQuery(question)
+	minScore := r.minScore()
+	items := make([]knowledgeChunk, 0)
+	for rows.Next() {
+		var item knowledgeChunk
+		var rawMetadata, rawEmbedding string
+		var distance float64
+		if err := rows.Scan(&item.ID, &item.SourceType, &item.SourceID, &item.Visibility, &item.Title, &item.Summary, &item.Content, &rawMetadata, &rawEmbedding, &distance); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal([]byte(rawMetadata), &item.Metadata)
+		_ = json.Unmarshal([]byte(rawEmbedding), &item.Embedding)
+		item.VectorScore = math.Max(0, 1-distance)
+		item.KeywordScore = keywordScore(item, terms)
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	items = r.rerank(question, items)
+	filtered := items[:0]
+	for _, item := range items {
+		if item.Score >= minScore {
+			filtered = append(filtered, item)
+		}
+	}
+	items = filtered
+	if len(items) > topK {
+		items = items[:topK]
+	}
+	return items, nil
+}
+
+func (r *RAGService) rerank(question string, items []knowledgeChunk) []knowledgeChunk {
+	if len(items) == 0 {
+		return items
+	}
+	terms := tokenizeQuery(question)
+	bm25Scores := bm25Scores(terms, items)
+	weights := r.sourceWeights()
+	for i := range items {
+		items[i].BM25Score = bm25Scores[i]
+		items[i].SourceWeight = weights[items[i].SourceType]
+		if items[i].SourceWeight <= 0 {
+			items[i].SourceWeight = 1
+		}
+		base := items[i].VectorScore*0.58 + items[i].BM25Score*0.32 + items[i].KeywordScore*0.10
+		titleBoost := 0.0
+		if scoreText(strings.ToLower(items[i].Title), terms) > 0 {
+			titleBoost = 0.04
+		}
+		items[i].RerankScore = math.Min((base+titleBoost)*items[i].SourceWeight, 1.5)
+		items[i].Score = items[i].RerankScore
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].Score == items[j].Score {
+			return items[i].UpdatedTitle() < items[j].UpdatedTitle()
+		}
+		return items[i].Score > items[j].Score
+	})
+	if n := r.rerankTopN(); n > 0 && len(items) > n {
+		items = items[:n]
+	}
+	return items
+}
+
+func (c knowledgeChunk) UpdatedTitle() string {
+	return strings.ToLower(c.SourceType + ":" + c.Title)
+}
+
+func keywordScore(item knowledgeChunk, terms []string) float64 {
+	text := strings.ToLower(item.Title + " " + item.Summary + " " + item.Content)
+	return math.Min(float64(scoreText(text, terms))/12, 1)
+}
+
+func bm25Scores(terms []string, items []knowledgeChunk) []float64 {
+	out := make([]float64, len(items))
+	if len(terms) == 0 || len(items) == 0 {
+		return out
+	}
+	type docStats struct {
+		tokens []string
+		counts map[string]int
+		length int
+	}
+	docs := make([]docStats, len(items))
+	df := map[string]int{}
+	totalLength := 0
+	uniqueTerms := uniqueStrings(terms)
+	for i, item := range items {
+		tokens := tokenizeQuery(item.Title + " " + item.Summary + " " + item.Content)
+		counts := map[string]int{}
+		for _, token := range tokens {
+			counts[token]++
+		}
+		docs[i] = docStats{tokens: tokens, counts: counts, length: len(tokens)}
+		totalLength += len(tokens)
+		for _, term := range uniqueTerms {
+			if counts[term] > 0 {
+				df[term]++
+			}
+		}
+	}
+	avgLength := float64(totalLength) / float64(len(items))
+	if avgLength <= 0 {
+		avgLength = 1
+	}
+	const k1 = 1.2
+	const b = 0.75
+	maxScore := 0.0
+	for i, doc := range docs {
+		score := 0.0
+		for _, term := range uniqueTerms {
+			tf := float64(doc.counts[term])
+			if tf == 0 {
+				continue
+			}
+			idf := math.Log(1 + (float64(len(items))-float64(df[term])+0.5)/(float64(df[term])+0.5))
+			denom := tf + k1*(1-b+b*float64(doc.length)/avgLength)
+			score += idf * (tf * (k1 + 1)) / denom
+		}
+		out[i] = score
+		if score > maxScore {
+			maxScore = score
+		}
+	}
+	if maxScore > 0 {
+		for i := range out {
+			out[i] = out[i] / maxScore
+		}
+	}
+	return out
+}
+
 func (r *RAGService) generateAnswer(ctx context.Context, question string, chunks []knowledgeChunk) (string, error) {
+	return r.ai.Chat(ctx, r.answerChatRequest(question, chunks))
+}
+
+func (r *RAGService) answerChatRequest(question string, chunks []knowledgeChunk) ChatRequest {
 	var contextText strings.Builder
 	for i, chunk := range chunks {
 		fmt.Fprintf(&contextText, "[%d] %s\n%s\n\n", i+1, chunk.Title, limitRunes(chunk.Content, 1200))
 	}
-	return r.ai.Chat(ctx, ChatRequest{
-		System: "你是这个站点的知识库助手。只能基于提供的资料回答；资料不足时要明确说明。回答使用中文，简洁、有条理，并在关键结论后标注来源编号，如 [1]。",
+	return ChatRequest{
+		System: "你是这个站点的知识库助手。只能基于提供的资料回答；资料不足时要明确说明。回答使用中文，简洁、有条理，并在关键结论后标注来源编号，例如 [1]。",
 		User:   "用户问题：\n" + question + "\n\n可用资料：\n" + contextText.String(),
-	})
+	}
 }
 
 func (r *RAGService) extractiveAnswer(question string, chunks []knowledgeChunk) string {
 	if len(chunks) == 0 {
-		return "暂时没有在已发布内容里找到强相关资料。你可以换一个关键词，比如 React、Go、数据库或项目复盘。"
+		return "暂时没有在可检索内容里找到强相关资料。你可以换一个关键词，例如 React、Go、数据库或项目复盘。"
 	}
 	titles := make([]string, 0, len(chunks))
 	for _, chunk := range chunks {
@@ -685,6 +1038,7 @@ func buildSiteResourceChunks(item models.SiteResource) []knowledgeChunkInput {
 		out = append(out, knowledgeChunkInput{
 			SourceType: knowledgeSourceResource,
 			SourceID:   item.ID,
+			Visibility: knowledgeVisibilityPublic,
 			Title:      title,
 			Summary:    item.Summary,
 			Content:    strings.TrimSpace(strings.Join([]string{item.Title, item.Category, item.Tags, part}, "\n")),
@@ -706,6 +1060,7 @@ func buildSiteProjectChunks(item models.SiteProject) []knowledgeChunkInput {
 	return []knowledgeChunkInput{{
 		SourceType: knowledgeSourceProject,
 		SourceID:   item.ID,
+		Visibility: knowledgeVisibilityPublic,
 		Title:      item.Name,
 		Summary:    item.Summary,
 		Content: strings.TrimSpace(strings.Join([]string{
@@ -728,6 +1083,7 @@ func buildSiteTechStackChunks(item models.SiteTechStack) []knowledgeChunkInput {
 	return []knowledgeChunkInput{{
 		SourceType: knowledgeSourceTech,
 		SourceID:   item.ID,
+		Visibility: knowledgeVisibilityPublic,
 		Title:      item.Name,
 		Summary:    item.Description,
 		Content: strings.TrimSpace(strings.Join([]string{
@@ -758,6 +1114,7 @@ func buildSiteTimelineChunks(item models.SiteTimelineEvent) []knowledgeChunkInpu
 		out = append(out, knowledgeChunkInput{
 			SourceType: knowledgeSourceTimeline,
 			SourceID:   item.ID,
+			Visibility: knowledgeVisibilityPublic,
 			Title:      title,
 			Summary:    item.Summary,
 			Content: strings.TrimSpace(strings.Join([]string{
@@ -787,6 +1144,7 @@ func buildUploadedDocumentChunks(item models.UploadedDocument) []knowledgeChunkI
 	}
 	parts := splitText(text, 900, 180)
 	out := make([]knowledgeChunkInput, 0, len(parts))
+	visibility := normalizeVisibility(item.Visibility)
 	for i, part := range parts {
 		title := item.OriginalName
 		if len(parts) > 1 {
@@ -795,6 +1153,7 @@ func buildUploadedDocumentChunks(item models.UploadedDocument) []knowledgeChunkI
 		out = append(out, knowledgeChunkInput{
 			SourceType: knowledgeSourceDocument,
 			SourceID:   item.ID,
+			Visibility: visibility,
 			Title:      title,
 			Summary:    fmt.Sprintf("%s · %d bytes", item.MimeType, item.FileSize),
 			Content: strings.TrimSpace(strings.Join([]string{
@@ -803,8 +1162,11 @@ func buildUploadedDocumentChunks(item models.UploadedDocument) []knowledgeChunkI
 				part,
 			}, "\n")),
 			Metadata: map[string]any{
-				"file_path": item.FilePath,
-				"mime_type": item.MimeType,
+				"file_path":   item.FilePath,
+				"mime_type":   item.MimeType,
+				"visibility":  visibility,
+				"chunk_index": i + 1,
+				"chunk_count": len(parts),
 			},
 		})
 	}
@@ -840,13 +1202,23 @@ func splitText(text string, size, overlap int) []string {
 func chunksToSources(chunks []knowledgeChunk, question string) []models.KnowledgeSource {
 	out := make([]models.KnowledgeSource, 0, len(chunks))
 	terms := tokenizeQuery(question)
-	for _, chunk := range chunks {
+	minScore := envFloat("RAG_MIN_SCORE", defaultRAGMinScore)
+	for index, chunk := range chunks {
 		out = append(out, models.KnowledgeSource{
+			ChunkID:         chunk.ID,
+			CitationID:      index + 1,
 			SourceType:      chunk.SourceType,
 			SourceID:        chunk.SourceID,
+			Visibility:      normalizeVisibility(chunk.Visibility),
 			Title:           chunk.Title,
 			Summary:         chunk.Summary,
 			Score:           math.Round(chunk.Score*10000) / 10000,
+			VectorScore:     math.Round(chunk.VectorScore*10000) / 10000,
+			BM25Score:       math.Round(chunk.BM25Score*10000) / 10000,
+			KeywordScore:    math.Round(chunk.KeywordScore*10000) / 10000,
+			SourceWeight:    math.Round(chunk.SourceWeight*10000) / 10000,
+			RerankScore:     math.Round(chunk.RerankScore*10000) / 10000,
+			Threshold:       math.Round(minScore*10000) / 10000,
 			URL:             sourceURL(chunk),
 			Snippet:         buildSnippet(chunk.Content, terms, 180),
 			HighlightedText: highlightSnippet(buildSnippet(chunk.Content, terms, 180), terms),
@@ -960,6 +1332,57 @@ func (r *RAGService) suggestQuestions(question string, chunks []knowledgeChunk) 
 		return base[:4]
 	}
 	return base
+}
+
+func loadRAGEvalCases() []models.RAGEvalCase {
+	raw := strings.TrimSpace(os.Getenv("RAG_EVAL_CASES_JSON"))
+	if raw != "" {
+		var cases []models.RAGEvalCase
+		if json.Unmarshal([]byte(raw), &cases) == nil && len(cases) > 0 {
+			return cases
+		}
+	}
+	return []models.RAGEvalCase{
+		{ID: "site-stack", Question: "这个项目使用了哪些前后端技术？", ExpectedSources: []string{knowledgeSourceTech, knowledgeSourceProject}, ExpectedTerms: []string{"Go", "Vue"}},
+		{ID: "site-projects", Question: "有哪些可以展示的项目经验？", ExpectedSources: []string{knowledgeSourceProject}, ExpectedTerms: []string{"项目"}},
+		{ID: "learning-notes", Question: "有没有学习笔记或文章可以继续看？", ExpectedSources: []string{knowledgeSourceResource}, ExpectedTerms: []string{"学习", "文章"}},
+		{ID: "timeline", Question: "最近的成长时间线有哪些关键节点？", ExpectedSources: []string{knowledgeSourceTimeline}, ExpectedTerms: []string{"时间线", "阶段"}},
+	}
+}
+
+func evalRecallHit(item models.RAGEvalCase, sources []models.KnowledgeSource) bool {
+	if len(item.ExpectedSources) == 0 {
+		return len(sources) > 0
+	}
+	expected := map[string]bool{}
+	for _, source := range item.ExpectedSources {
+		expected[strings.TrimSpace(source)] = true
+	}
+	for _, source := range sources {
+		key := source.SourceType
+		if expected[key] || expected[fmt.Sprintf("%s:%d", source.SourceType, source.SourceID)] {
+			return true
+		}
+	}
+	return false
+}
+
+func evalAnswerQuality(item models.RAGEvalCase, answer string) float64 {
+	answer = strings.ToLower(answer)
+	terms := uniqueStrings(item.ExpectedTerms)
+	if len(terms) == 0 {
+		if strings.TrimSpace(answer) == "" {
+			return 0
+		}
+		return 1
+	}
+	hits := 0
+	for _, term := range terms {
+		if strings.Contains(answer, strings.ToLower(term)) {
+			hits++
+		}
+	}
+	return math.Round(float64(hits)/float64(len(terms))*10000) / 10000
 }
 
 func sourceURL(chunk knowledgeChunk) string {
@@ -1088,6 +1511,47 @@ func (r *RAGService) vectorDim() int {
 	return envInt("RAG_VECTOR_DIM", 256)
 }
 
+func (r *RAGService) minScore() float64 {
+	return envFloat("RAG_MIN_SCORE", defaultRAGMinScore)
+}
+
+func (r *RAGService) rerankTopN() int {
+	value := envInt("RAG_RERANK_TOP_N", r.top*6)
+	if value < r.top {
+		return r.top
+	}
+	return value
+}
+
+func (r *RAGService) sourceWeights() map[string]float64 {
+	return map[string]float64{
+		knowledgeSourceResource: envFloat("RAG_WEIGHT_RESOURCE", 1),
+		knowledgeSourceProject:  envFloat("RAG_WEIGHT_PROJECT", 1),
+		knowledgeSourceTech:     envFloat("RAG_WEIGHT_TECH", 1),
+		knowledgeSourceTimeline: envFloat("RAG_WEIGHT_TIMELINE", 1),
+		knowledgeSourceDocument: envFloat("RAG_WEIGHT_DOCUMENT", 1),
+	}
+}
+
+func (r *RAGService) streamingEnabled(ctx context.Context) bool {
+	client := r.ai
+	if dbClient, ok := client.(*dbBackedAIClient); ok {
+		active, err := dbClient.activeClient(ctx)
+		return err == nil && supportsChatStream(active)
+	}
+	return supportsChatStream(client)
+}
+
+func normalizeVisibility(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	switch value {
+	case knowledgeVisibilityPublic, knowledgeVisibilityInternal:
+		return value
+	default:
+		return knowledgeVisibilityInternal
+	}
+}
+
 func vectorLiteral(values []float64) string {
 	parts := make([]string, 0, len(values))
 	for _, value := range values {
@@ -1143,6 +1607,25 @@ func limitRunes(value string, max int) string {
 	return string(runes[:max]) + "..."
 }
 
+func streamTextChunks(value string, size int) []string {
+	runes := []rune(value)
+	if size <= 0 {
+		size = 16
+	}
+	if len(runes) == 0 {
+		return []string{""}
+	}
+	out := make([]string, 0, len(runes)/size+1)
+	for start := 0; start < len(runes); start += size {
+		end := start + size
+		if end > len(runes) {
+			end = len(runes)
+		}
+		out = append(out, string(runes[start:end]))
+	}
+	return out
+}
+
 func envInt(key string, fallback int) int {
 	value := strings.TrimSpace(os.Getenv(key))
 	if value == "" {
@@ -1150,6 +1633,18 @@ func envInt(key string, fallback int) int {
 	}
 	n, err := strconv.Atoi(value)
 	if err != nil || n <= 0 {
+		return fallback
+	}
+	return n
+}
+
+func envFloat(key string, fallback float64) float64 {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	n, err := strconv.ParseFloat(value, 64)
+	if err != nil || n < 0 {
 		return fallback
 	}
 	return n

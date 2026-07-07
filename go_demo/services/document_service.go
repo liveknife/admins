@@ -22,11 +22,19 @@ type DocumentService struct {
 	rag *RAGService
 }
 
+type DocumentUploadOptions struct {
+	Visibility string
+}
+
 func NewDocumentService(db *sql.DB) *DocumentService {
 	return &DocumentService{db: db, rag: NewRAGService(db)}
 }
 
 func (s *DocumentService) Upload(ctx context.Context, file *multipart.FileHeader) (*models.UploadedDocument, error) {
+	return s.UploadWithOptions(ctx, file, DocumentUploadOptions{})
+}
+
+func (s *DocumentService) UploadWithOptions(ctx context.Context, file *multipart.FileHeader, opts DocumentUploadOptions) (*models.UploadedDocument, error) {
 	if file == nil {
 		return nil, fmt.Errorf("missing file")
 	}
@@ -73,7 +81,8 @@ func (s *DocumentService) Upload(ctx context.Context, file *multipart.FileHeader
 		errorMessage = "no text content extracted"
 	}
 
-	id, err := s.insertDocument(ctx, file.Filename, safeName, filepath.ToSlash(path), mimeType, file.Size, text, status, errorMessage)
+	visibility := normalizeVisibility(opts.Visibility)
+	id, err := s.insertDocument(ctx, file.Filename, safeName, filepath.ToSlash(path), mimeType, file.Size, visibility, text, status, errorMessage)
 	if err != nil {
 		return nil, err
 	}
@@ -94,14 +103,14 @@ func (s *DocumentService) Upload(ctx context.Context, file *multipart.FileHeader
 	return item, nil
 }
 
-func (s *DocumentService) insertDocument(ctx context.Context, originalName, fileName, filePath, mimeType string, size int64, text, status, errorMessage string) (int64, error) {
+func (s *DocumentService) insertDocument(ctx context.Context, originalName, fileName, filePath, mimeType string, size int64, visibility, text, status, errorMessage string) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
-	id, err := database.InsertID(tx, `INSERT INTO uploaded_documents(original_name,file_name,file_path,mime_type,file_size,text_content,status,error_message) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-		originalName, fileName, filePath, mimeType, size, text, status, errorMessage)
+	id, err := database.InsertID(tx, `INSERT INTO uploaded_documents(original_name,file_name,file_path,mime_type,file_size,visibility,text_content,status,error_message) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+		originalName, fileName, filePath, mimeType, size, visibility, text, status, errorMessage)
 	if err != nil {
 		return 0, err
 	}
@@ -114,7 +123,7 @@ func (s *DocumentService) List(ctx context.Context, page, pageSize int) ([]model
 	if err := database.QueryRowCtx(ctx, s.db, `SELECT COUNT(*) FROM uploaded_documents`).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	rows, err := database.QueryCtx(ctx, s.db, `SELECT id,original_name,file_name,file_path,mime_type,file_size,'' AS text_content,chunk_count,status,error_message,created_at,updated_at FROM uploaded_documents ORDER BY id DESC LIMIT $1 OFFSET $2`, limit, offset)
+	rows, err := database.QueryCtx(ctx, s.db, `SELECT id,original_name,file_name,file_path,mime_type,file_size,visibility,'' AS text_content,chunk_count,status,error_message,created_at,updated_at FROM uploaded_documents ORDER BY id DESC LIMIT $1 OFFSET $2`, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -135,7 +144,7 @@ func (s *DocumentService) Get(ctx context.Context, id int64, includeText bool) (
 	if includeText {
 		textExpr = "text_content"
 	}
-	row := database.QueryRowCtx(ctx, s.db, `SELECT id,original_name,file_name,file_path,mime_type,file_size,`+textExpr+`,chunk_count,status,error_message,created_at,updated_at FROM uploaded_documents WHERE id=$1`, id)
+	row := database.QueryRowCtx(ctx, s.db, `SELECT id,original_name,file_name,file_path,mime_type,file_size,visibility,`+textExpr+`,chunk_count,status,error_message,created_at,updated_at FROM uploaded_documents WHERE id=$1`, id)
 	item, err := scanUploadedDocument(row)
 	if err != nil {
 		return nil, err
@@ -145,6 +154,27 @@ func (s *DocumentService) Get(ctx context.Context, id int64, includeText bool) (
 
 func (s *DocumentService) Preview(ctx context.Context, id int64) (*models.UploadedDocument, error) {
 	return s.Get(ctx, id, true)
+}
+
+func (s *DocumentService) UpdateVisibility(ctx context.Context, id int64, visibility string) (*models.UploadedDocument, error) {
+	visibility = normalizeVisibility(visibility)
+	if _, err := database.ExecCtx(ctx, s.db, `UPDATE uploaded_documents SET visibility=$1,updated_at=`+database.Now()+` WHERE id=$2`, visibility, id); err != nil {
+		return nil, err
+	}
+	item, err := s.Get(ctx, id, true)
+	if err != nil {
+		return nil, err
+	}
+	if item.Status == "active" {
+		if err := s.rag.SyncUploadedDocument(ctx, item); err != nil {
+			_ = s.markFailed(ctx, id, err.Error())
+			return s.Get(ctx, id, true)
+		}
+		count := len(buildUploadedDocumentChunks(*item))
+		_, _ = database.ExecCtx(ctx, s.db, `UPDATE uploaded_documents SET chunk_count=$1,status='active',error_message='',updated_at=`+database.Now()+` WHERE id=$2`, count, id)
+		item.ChunkCount = count
+	}
+	return item, nil
 }
 
 func (s *DocumentService) Delete(ctx context.Context, id int64) (int64, error) {
@@ -205,16 +235,17 @@ type uploadedDocumentScanner interface {
 
 func scanUploadedDocument(scanner uploadedDocumentScanner) (models.UploadedDocument, error) {
 	var item models.UploadedDocument
-	err := scanner.Scan(&item.ID, &item.OriginalName, &item.FileName, &item.FilePath, &item.MimeType, &item.FileSize, &item.TextContent, &item.ChunkCount, &item.Status, &item.ErrorMessage, &item.CreatedAt, &item.UpdatedAt)
+	err := scanner.Scan(&item.ID, &item.OriginalName, &item.FileName, &item.FilePath, &item.MimeType, &item.FileSize, &item.Visibility, &item.TextContent, &item.ChunkCount, &item.Status, &item.ErrorMessage, &item.CreatedAt, &item.UpdatedAt)
+	item.Visibility = normalizeVisibility(item.Visibility)
 	return item, err
 }
 
 func extractDocumentText(raw []byte, ext string) (string, error) {
 	switch ext {
 	case ".txt", ".md", ".markdown":
-		return strings.TrimSpace(string(bytes.TrimPrefix(raw, []byte{0xEF, 0xBB, 0xBF}))), nil
+		return normalizeDocumentText(string(bytes.TrimPrefix(raw, []byte{0xEF, 0xBB, 0xBF}))), nil
 	case ".pdf":
-		text := extractPDFTextLoose(raw)
+		text := normalizeDocumentText(extractPDFTextLoose(raw))
 		if strings.TrimSpace(text) == "" {
 			return "", fmt.Errorf("PDF text extraction failed; please upload a text-based PDF or MD/TXT version")
 		}
@@ -222,6 +253,28 @@ func extractDocumentText(raw []byte, ext string) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported file type")
 	}
+}
+
+func normalizeDocumentText(value string) string {
+	value = strings.ReplaceAll(value, "\x00", "")
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	value = strings.ReplaceAll(value, "\r", "\n")
+	lines := strings.Split(value, "\n")
+	out := make([]string, 0, len(lines))
+	blank := false
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			if !blank && len(out) > 0 {
+				out = append(out, "")
+			}
+			blank = true
+			continue
+		}
+		out = append(out, strings.Join(strings.Fields(line), " "))
+		blank = false
+	}
+	return strings.TrimSpace(strings.Join(out, "\n"))
 }
 
 func extractPDFTextLoose(raw []byte) string {

@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -29,6 +30,20 @@ type AIClient interface {
 type ChatRequest struct {
 	System string
 	User   string
+}
+
+type ChatTokenHandler func(token string) error
+
+type ChatStreamingClient interface {
+	ChatStream(ctx context.Context, req ChatRequest, onToken ChatTokenHandler) error
+}
+
+func supportsChatStream(client AIClient) bool {
+	if client == nil {
+		return false
+	}
+	_, ok := client.(ChatStreamingClient)
+	return ok
 }
 
 type AIAPIError struct {
@@ -121,6 +136,25 @@ func (c *dbBackedAIClient) Chat(ctx context.Context, req ChatRequest) (string, e
 		return "", err
 	}
 	return client.Chat(ctx, req)
+}
+
+func (c *dbBackedAIClient) ChatStream(ctx context.Context, req ChatRequest, onToken ChatTokenHandler) error {
+	client, err := c.activeClient(ctx)
+	if err != nil {
+		return err
+	}
+	streamer, ok := client.(ChatStreamingClient)
+	if !ok {
+		answer, err := client.Chat(ctx, req)
+		if err != nil {
+			return err
+		}
+		if onToken != nil {
+			return onToken(answer)
+		}
+		return nil
+	}
+	return streamer.ChatStream(ctx, req, onToken)
 }
 
 func (c *dbBackedAIClient) activeClient(ctx context.Context) (AIClient, error) {
@@ -271,6 +305,93 @@ func (c *openAICompatibleClient) Chat(ctx context.Context, req ChatRequest) (str
 		return "", errors.New("chat response is empty")
 	}
 	return answer, nil
+}
+
+func (c *openAICompatibleClient) ChatStream(ctx context.Context, req ChatRequest, onToken ChatTokenHandler) error {
+	if c.chatModel == "" {
+		return errors.New("chat model is not configured")
+	}
+	messages := []map[string]string{}
+	if strings.TrimSpace(req.System) != "" {
+		messages = append(messages, map[string]string{"role": "system", "content": req.System})
+	}
+	messages = append(messages, map[string]string{"role": "user", "content": req.User})
+	body := map[string]any{
+		"model":       c.chatModel,
+		"messages":    messages,
+		"temperature": c.temperature,
+		"stream":      true,
+	}
+	if c.maxTokens > 0 {
+		body["max_tokens"] = c.maxTokens
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "text/event-stream")
+	if c.apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return apiResponseError(c.provider, "/chat/completions", resp)
+	}
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, ":") {
+			continue
+		}
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "[DONE]" {
+			return nil
+		}
+		var chunk struct {
+			Choices []struct {
+				Delta struct {
+					Content string `json:"content"`
+				} `json:"delta"`
+				Message struct {
+					Content string `json:"content"`
+				} `json:"message"`
+			} `json:"choices"`
+			Error *struct {
+				Message string `json:"message"`
+			} `json:"error,omitempty"`
+		}
+		if json.Unmarshal([]byte(data), &chunk) != nil {
+			continue
+		}
+		if chunk.Error != nil && chunk.Error.Message != "" {
+			return errors.New(chunk.Error.Message)
+		}
+		for _, choice := range chunk.Choices {
+			token := choice.Delta.Content
+			if token == "" {
+				token = choice.Message.Content
+			}
+			if token != "" && onToken != nil {
+				if err := onToken(token); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return scanner.Err()
 }
 
 func (c *openAICompatibleClient) postJSON(ctx context.Context, path string, body any, out any) error {

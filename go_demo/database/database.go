@@ -60,11 +60,11 @@ func buildCreateTables(d *Dialect) []string {
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS site_timeline_events(id %s,title VARCHAR(180) NOT NULL,summary VARCHAR(500) NOT NULL DEFAULT '',content TEXT NOT NULL DEFAULT '',phase VARCHAR(100) NOT NULL DEFAULT '',event_type VARCHAR(60) NOT NULL DEFAULT 'learning',tags VARCHAR(500) NOT NULL DEFAULT '',link_url VARCHAR(1024) NOT NULL DEFAULT '',status VARCHAR(20) NOT NULL DEFAULT 'draft',is_featured BOOLEAN NOT NULL DEFAULT FALSE,sort_order INT NOT NULL DEFAULT 0,happened_at %s,published_at %s,created_at %s NOT NULL DEFAULT %s,updated_at %s NOT NULL DEFAULT %s)`, pk, ts, ts, ts, now, ts, now),
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS site_messages(id %s,visitor_name VARCHAR(120) NOT NULL DEFAULT '',email VARCHAR(255) NOT NULL DEFAULT '',content TEXT NOT NULL DEFAULT '',reply TEXT NOT NULL DEFAULT '',status VARCHAR(20) NOT NULL DEFAULT 'pending',is_public BOOLEAN NOT NULL DEFAULT TRUE,ip_address VARCHAR(80) NOT NULL DEFAULT '',user_agent TEXT NOT NULL DEFAULT '',created_at %s NOT NULL DEFAULT %s,updated_at %s NOT NULL DEFAULT %s)`, pk, ts, now, ts, now),
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS site_visits(id %s,path VARCHAR(1024) NOT NULL DEFAULT '/',referrer VARCHAR(1024) NOT NULL DEFAULT '',device VARCHAR(40) NOT NULL DEFAULT 'desktop',ip_address VARCHAR(80) NOT NULL DEFAULT '',user_agent TEXT NOT NULL DEFAULT '',created_at %s NOT NULL DEFAULT %s)`, pk, ts, now),
-		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS knowledge_chunks(id %s,source_type VARCHAR(80) NOT NULL,source_id BIGINT NOT NULL,title VARCHAR(240) NOT NULL DEFAULT '',summary VARCHAR(600) NOT NULL DEFAULT '',content TEXT NOT NULL,metadata_json TEXT NOT NULL DEFAULT '',embedding_json TEXT NOT NULL DEFAULT '',content_hash VARCHAR(64) NOT NULL,token_count INT NOT NULL DEFAULT 0,status VARCHAR(20) NOT NULL DEFAULT 'active',created_at %s NOT NULL DEFAULT %s,updated_at %s NOT NULL DEFAULT %s)`, pk, ts, now, ts, now),
+		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS knowledge_chunks(id %s,source_type VARCHAR(80) NOT NULL,source_id BIGINT NOT NULL,visibility VARCHAR(20) NOT NULL DEFAULT 'public',title VARCHAR(240) NOT NULL DEFAULT '',summary VARCHAR(600) NOT NULL DEFAULT '',content TEXT NOT NULL,metadata_json TEXT NOT NULL DEFAULT '',embedding_json TEXT NOT NULL DEFAULT '',content_hash VARCHAR(64) NOT NULL,token_count INT NOT NULL DEFAULT 0,status VARCHAR(20) NOT NULL DEFAULT 'active',created_at %s NOT NULL DEFAULT %s,updated_at %s NOT NULL DEFAULT %s)`, pk, ts, now, ts, now),
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS rag_index_jobs(id %s,job_type VARCHAR(40) NOT NULL DEFAULT 'rebuild',status VARCHAR(20) NOT NULL DEFAULT 'pending',retry_count INT NOT NULL DEFAULT 0,max_retries INT NOT NULL DEFAULT 3,error_message TEXT NOT NULL DEFAULT '',started_at %s,finished_at %s,created_at %s NOT NULL DEFAULT %s,updated_at %s NOT NULL DEFAULT %s)`, pk, ts, ts, ts, now, ts, now),
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS rag_query_logs(id %s,question TEXT NOT NULL,answer TEXT NOT NULL DEFAULT '',matched BOOLEAN NOT NULL DEFAULT FALSE,source_count INT NOT NULL DEFAULT 0,top_score DOUBLE PRECISION NOT NULL DEFAULT 0,latency_ms BIGINT NOT NULL DEFAULT 0,used_chat_model BOOLEAN NOT NULL DEFAULT FALSE,source_json TEXT NOT NULL DEFAULT '',created_at %s NOT NULL DEFAULT %s)`, pk, ts, now),
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS rag_feedback(id %s,query_log_id BIGINT NOT NULL DEFAULT 0,question TEXT NOT NULL DEFAULT '',rating VARCHAR(20) NOT NULL DEFAULT '',comment TEXT NOT NULL DEFAULT '',ip_address VARCHAR(80) NOT NULL DEFAULT '',user_agent TEXT NOT NULL DEFAULT '',created_at %s NOT NULL DEFAULT %s)`, pk, ts, now),
-		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS uploaded_documents(id %s,original_name VARCHAR(255) NOT NULL DEFAULT '',file_name VARCHAR(255) NOT NULL DEFAULT '',file_path VARCHAR(1024) NOT NULL DEFAULT '',mime_type VARCHAR(160) NOT NULL DEFAULT '',file_size BIGINT NOT NULL DEFAULT 0,text_content TEXT NOT NULL DEFAULT '',chunk_count INT NOT NULL DEFAULT 0,status VARCHAR(24) NOT NULL DEFAULT 'processing',error_message TEXT NOT NULL DEFAULT '',created_at %s NOT NULL DEFAULT %s,updated_at %s NOT NULL DEFAULT %s)`, pk, ts, now, ts, now),
+		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS uploaded_documents(id %s,original_name VARCHAR(255) NOT NULL DEFAULT '',file_name VARCHAR(255) NOT NULL DEFAULT '',file_path VARCHAR(1024) NOT NULL DEFAULT '',mime_type VARCHAR(160) NOT NULL DEFAULT '',file_size BIGINT NOT NULL DEFAULT 0,visibility VARCHAR(20) NOT NULL DEFAULT 'internal',text_content TEXT NOT NULL DEFAULT '',chunk_count INT NOT NULL DEFAULT 0,status VARCHAR(24) NOT NULL DEFAULT 'processing',error_message TEXT NOT NULL DEFAULT '',created_at %s NOT NULL DEFAULT %s,updated_at %s NOT NULL DEFAULT %s)`, pk, ts, now, ts, now),
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS ai_model_configs(id %s,name VARCHAR(120) NOT NULL,provider VARCHAR(60) NOT NULL DEFAULT 'openai',api_format VARCHAR(40) NOT NULL DEFAULT 'openai',base_url VARCHAR(1024) NOT NULL DEFAULT '',api_key TEXT NOT NULL DEFAULT '',chat_model VARCHAR(160) NOT NULL DEFAULT '',embedding_model VARCHAR(160) NOT NULL DEFAULT '',temperature DOUBLE PRECISION NOT NULL DEFAULT 0.2,max_tokens INT NOT NULL DEFAULT 0,timeout_seconds INT NOT NULL DEFAULT 45,extra_json TEXT NOT NULL DEFAULT '',is_default BOOLEAN NOT NULL DEFAULT FALSE,enabled BOOLEAN NOT NULL DEFAULT TRUE,last_test_status VARCHAR(20) NOT NULL DEFAULT '',last_test_message TEXT NOT NULL DEFAULT '',last_test_at %s,created_at %s NOT NULL DEFAULT %s,updated_at %s NOT NULL DEFAULT %s)`, pk, ts, ts, now, ts, now),
 	}
 }
@@ -121,6 +121,30 @@ func ensureColumns(db *sql.DB, d *Dialect) error {
 				return fmt.Errorf("add site resource column %s: %w", col, err)
 			}
 		}
+	}
+	ragCols := map[string]string{
+		"knowledge_chunks.visibility":   `ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS visibility VARCHAR(20) NOT NULL DEFAULT 'public'`,
+		"uploaded_documents.visibility": `ALTER TABLE uploaded_documents ADD COLUMN IF NOT EXISTS visibility VARCHAR(20) NOT NULL DEFAULT 'internal'`,
+	}
+	for key, stmt := range ragCols {
+		parts := strings.SplitN(key, ".", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		if !columnExists(db, d, parts[0], parts[1]) {
+			if _, err := db.Exec(stmt); err != nil {
+				return fmt.Errorf("add %s column %s: %w", parts[0], parts[1], err)
+			}
+		}
+	}
+	if _, err := db.Exec(d.RewriteSQL(`UPDATE knowledge_chunks SET visibility='internal' WHERE source_type='uploaded_document' AND (visibility='' OR visibility='public')`)); err != nil {
+		return fmt.Errorf("backfill uploaded document chunk visibility: %w", err)
+	}
+	if _, err := db.Exec(d.RewriteSQL(`UPDATE knowledge_chunks SET visibility='public' WHERE source_type<>'uploaded_document' AND (visibility='' OR visibility IS NULL)`)); err != nil {
+		return fmt.Errorf("backfill public chunk visibility: %w", err)
+	}
+	if _, err := db.Exec(d.RewriteSQL(`UPDATE uploaded_documents SET visibility='internal' WHERE visibility='' OR visibility IS NULL`)); err != nil {
+		return fmt.Errorf("backfill document visibility: %w", err)
 	}
 	return nil
 }
@@ -730,6 +754,7 @@ func buildIndexes(d *Dialect) []string {
 		`CREATE INDEX IF NOT EXISTS idx_site_visits_path ON site_visits(path, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_source ON knowledge_chunks(source_type, source_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_status ON knowledge_chunks(status, updated_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_visibility ON knowledge_chunks(visibility, status, updated_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_rag_index_jobs_status ON rag_index_jobs(status, updated_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_rag_query_logs_created ON rag_query_logs(created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_rag_feedback_query ON rag_feedback(query_log_id, created_at DESC)`,
@@ -755,6 +780,7 @@ func buildIndexes(d *Dialect) []string {
 		`CREATE INDEX idx_site_visits_path ON site_visits(path, created_at)`,
 		`CREATE INDEX idx_knowledge_chunks_source ON knowledge_chunks(source_type, source_id)`,
 		`CREATE INDEX idx_knowledge_chunks_status ON knowledge_chunks(status, updated_at)`,
+		`CREATE INDEX idx_knowledge_chunks_visibility ON knowledge_chunks(visibility, status, updated_at)`,
 		`CREATE INDEX idx_rag_index_jobs_status ON rag_index_jobs(status, updated_at)`,
 		`CREATE INDEX idx_rag_query_logs_created ON rag_query_logs(created_at)`,
 		`CREATE INDEX idx_rag_feedback_query ON rag_feedback(query_log_id, created_at)`,
