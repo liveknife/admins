@@ -181,6 +181,10 @@ export type RAGFeedback = {
   question: string;
   rating: string;
   comment: string;
+  status: string;
+  admin_note: string;
+  converted_eval_case_id?: string;
+  handled_at?: string;
   ip_address?: string;
   user_agent?: string;
   created_at: string;
@@ -206,6 +210,9 @@ export type RAGEvalCase = {
   question: string;
   expected_sources?: string[];
   expected_terms?: string[];
+  enabled: boolean;
+  created_at?: string;
+  updated_at?: string;
 };
 
 export type RAGEvalCaseResult = {
@@ -220,6 +227,7 @@ export type RAGEvalCaseResult = {
 };
 
 export type RAGEvalRun = {
+  id?: number;
   total: number;
   matched: number;
   recall_hits: number;
@@ -228,6 +236,45 @@ export type RAGEvalRun = {
   average_latency_ms: number;
   results: RAGEvalCaseResult[];
   created_at: string;
+};
+
+export type RAGEvalRunSummary = Omit<RAGEvalRun, "results">;
+
+export type RAGConfig = {
+  top_k: number;
+  min_score: number;
+  rerank_top_n: number;
+  vector_weight: number;
+  bm25_weight: number;
+  keyword_weight: number;
+  title_boost: number;
+  source_weights: Record<string, number>;
+  updated_at?: string;
+};
+
+export type RAGAnalytics = {
+  query_count: number;
+  hit_count: number;
+  hit_rate: number;
+  avg_latency_ms: number;
+  avg_source_count: number;
+  avg_top_score: number;
+  source_metrics: Array<{
+    name: string;
+    queries: number;
+    hits: number;
+    avg_score: number;
+    avg_rank: number;
+    chunk_hits: number;
+  }>;
+  daily_metrics: Array<{
+    date: string;
+    queries: number;
+    hit_rate: number;
+    avg_latency: number;
+  }>;
+  low_confidence: RAGQueryLog[];
+  no_hit_queries: RAGQueryLog[];
 };
 
 export type UploadedDocument = {
@@ -268,6 +315,59 @@ export type AIModelConfig = {
   last_test_at?: string;
   created_at: string;
   updated_at: string;
+};
+
+export type SystemSetting = {
+  id: number;
+  setting_key: string;
+  setting_value: string;
+  group_name: string;
+  value_type: string;
+  description: string;
+  is_secret: boolean;
+  updated_at: string;
+};
+
+export type AIModelCallLog = {
+  id: number;
+  provider: string;
+  api_format: string;
+  model: string;
+  operation: string;
+  status: string;
+  latency_ms: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  request_chars: number;
+  response_chars: number;
+  error_message: string;
+  created_at: string;
+};
+
+export type AIModelCallStats = {
+  total_calls: number;
+  success_calls: number;
+  error_calls: number;
+  avg_latency_ms: number;
+  total_tokens: number;
+  today_calls: number;
+  daily_stats: Array<{
+    date: string;
+    calls: number;
+    errors: number;
+    avg_ms: number;
+    tokens: number;
+  }>;
+  model_stats: Array<{
+    model: string;
+    calls: number;
+    errors: number;
+    avg_ms: number;
+    tokens: number;
+    provider: string;
+  }>;
+  recent_errors: AIModelCallLog[];
+  generated_at: string;
 };
 
 export type SystemHealth = {
@@ -397,9 +497,18 @@ export type SiteProject = {
   demo_url: string;
   repo_url: string;
   stack_tags: string;
+  role: string;
+  highlights: string;
+  metrics: string;
+  challenge: string;
+  solution: string;
+  gallery_json: string;
   status: string;
   is_featured: boolean;
   sort_order: number;
+  priority: number;
+  start_date?: string;
+  end_date?: string;
   published_at?: string;
   created_at: string;
   updated_at: string;
@@ -447,6 +556,19 @@ export type SiteAnalytics = {
   top_pages: Array<{ path: string; visits: number }>;
   device_stats: Array<{ device: string; visits: number }>;
   top_articles: SiteResource[];
+};
+
+export type SiteOperationsDashboard = {
+  analytics: SiteAnalytics;
+  published_projects: number;
+  draft_projects: number;
+  featured_projects: number;
+  draft_resources: number;
+  conversion_rate: number;
+  top_projects: SiteProject[];
+  recent_messages: SiteMessage[];
+  content_health: Array<{ label: string; value: number; tone: string }>;
+  generated_at: string;
 };
 
 export type RolePayload = {
@@ -752,6 +874,27 @@ export const deleteAIModelConfig = (id: number) => {
   return http.request<void>("delete", `/api/v1/admin/ai/model-configs/${id}`);
 };
 
+export const getAIModelCallLogs = (
+  params?: PageParams & {
+    provider?: string;
+    operation?: string;
+    status?: string;
+  }
+) => {
+  return http.request<PagedResult<"logs", AIModelCallLog>>(
+    "get",
+    "/api/v1/admin/ai/call-logs",
+    { params }
+  );
+};
+
+export const getAIModelCallStats = () => {
+  return http.request<{ stats: AIModelCallStats }>(
+    "get",
+    "/api/v1/admin/ai/call-stats"
+  );
+};
+
 export const getRAGIndexStats = () => {
   return http.request<{ stats: RAGIndexStats }>(
     "get",
@@ -789,11 +932,56 @@ export const getRAGQueryLogs = (limit = 30) => {
   );
 };
 
-export const getRAGFeedback = (params?: { limit?: number; rating?: string }) => {
+export const getRAGFeedback = (params?: {
+  limit?: number;
+  rating?: string;
+  status?: string;
+}) => {
   return http.request<{ feedback: RAGFeedback[] }>(
     "get",
     "/api/v1/admin/ai/rag/feedback",
     { params }
+  );
+};
+
+export const updateRAGFeedbackStatus = (
+  id: number,
+  data: { status: string; admin_note?: string }
+) => {
+  return http.request<{ feedback: RAGFeedback }>(
+    "put",
+    `/api/v1/admin/ai/rag/feedback/${id}/status`,
+    { data }
+  );
+};
+
+export const convertRAGFeedbackToEvalCase = (id: number) => {
+  return http.request<{ case: RAGEvalCase }>(
+    "post",
+    `/api/v1/admin/ai/rag/feedback/${id}/eval-case`
+  );
+};
+
+export const getRAGConfig = () => {
+  return http.request<{ config: RAGConfig }>(
+    "get",
+    "/api/v1/admin/ai/rag/config"
+  );
+};
+
+export const saveRAGConfig = (data: RAGConfig) => {
+  return http.request<{ config: RAGConfig }>(
+    "put",
+    "/api/v1/admin/ai/rag/config",
+    { data }
+  );
+};
+
+export const getRAGAnalytics = (limit = 500) => {
+  return http.request<{ analytics: RAGAnalytics }>(
+    "get",
+    "/api/v1/admin/ai/rag/analytics",
+    { params: { limit } }
   );
 };
 
@@ -814,6 +1002,38 @@ export const runRAGEval = (includeInternal = true) => {
     "post",
     "/api/v1/admin/ai/rag/evals/run",
     { params: { include_internal: includeInternal } }
+  );
+};
+
+export const getRAGEvalCases = () => {
+  return http.request<{ cases: RAGEvalCase[] }>(
+    "get",
+    "/api/v1/admin/ai/rag/eval-cases"
+  );
+};
+
+export const saveRAGEvalCase = (data: RAGEvalCase, id?: string) => {
+  return http.request<{ case: RAGEvalCase }>(
+    id ? "put" : "post",
+    id
+      ? `/api/v1/admin/ai/rag/eval-cases/${encodeURIComponent(id)}`
+      : "/api/v1/admin/ai/rag/eval-cases",
+    { data }
+  );
+};
+
+export const deleteRAGEvalCase = (id: string) => {
+  return http.request<void>(
+    "delete",
+    `/api/v1/admin/ai/rag/eval-cases/${encodeURIComponent(id)}`
+  );
+};
+
+export const getRAGEvalRuns = (limit = 20) => {
+  return http.request<{ runs: RAGEvalRunSummary[] }>(
+    "get",
+    "/api/v1/admin/ai/rag/evals/runs",
+    { params: { limit } }
   );
 };
 
@@ -891,6 +1111,21 @@ export const getSystemHealth = () => {
   return http.request<{ health: SystemHealth }>(
     "get",
     "/api/v1/admin/health"
+  );
+};
+
+export const getSystemSettings = () => {
+  return http.request<{ settings: SystemSetting[] }>(
+    "get",
+    "/api/v1/admin/system/settings"
+  );
+};
+
+export const saveSystemSettings = (settings: Partial<SystemSetting>[]) => {
+  return http.request<{ settings: SystemSetting[] }>(
+    "put",
+    "/api/v1/admin/system/settings",
+    { data: { settings } }
   );
 };
 
@@ -1088,6 +1323,13 @@ export const getSiteAnalytics = () => {
   return http.request<{ analytics: SiteAnalytics }>(
     "get",
     "/api/v1/admin/site/analytics"
+  );
+};
+
+export const getSiteOperationsDashboard = () => {
+  return http.request<{ dashboard: SiteOperationsDashboard }>(
+    "get",
+    "/api/v1/admin/site/operations"
   );
 };
 

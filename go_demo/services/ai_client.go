@@ -119,53 +119,127 @@ type dbBackedAIClient struct {
 }
 
 func (c *dbBackedAIClient) ChatEnabled() bool {
-	return c.fallback != nil && c.fallback.ChatEnabled()
+	return c.db != nil || (c.fallback != nil && c.fallback.ChatEnabled())
 }
 
 func (c *dbBackedAIClient) Embed(ctx context.Context, texts []string) ([][]float64, error) {
-	client, err := c.activeClient(ctx)
+	start := time.Now()
+	client, cfg, err := c.activeClientWithConfig(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return client.Embed(ctx, texts)
+	out, err := client.Embed(ctx, texts)
+	c.recordCall(ctx, cfg, "embed", countTextChars(texts...), 0, err, start)
+	return out, err
 }
 
 func (c *dbBackedAIClient) Chat(ctx context.Context, req ChatRequest) (string, error) {
-	client, err := c.activeClient(ctx)
+	start := time.Now()
+	client, cfg, err := c.activeClientWithConfig(ctx)
 	if err != nil {
 		return "", err
 	}
-	return client.Chat(ctx, req)
+	answer, err := client.Chat(ctx, req)
+	c.recordCall(ctx, cfg, "chat", countTextChars(req.System, req.User), utf8.RuneCountInString(answer), err, start)
+	return answer, err
 }
 
 func (c *dbBackedAIClient) ChatStream(ctx context.Context, req ChatRequest, onToken ChatTokenHandler) error {
-	client, err := c.activeClient(ctx)
+	start := time.Now()
+	client, cfg, err := c.activeClientWithConfig(ctx)
 	if err != nil {
 		return err
 	}
+	var response strings.Builder
 	streamer, ok := client.(ChatStreamingClient)
 	if !ok {
 		answer, err := client.Chat(ctx, req)
 		if err != nil {
+			c.recordCall(ctx, cfg, "stream", countTextChars(req.System, req.User), 0, err, start)
 			return err
 		}
+		response.WriteString(answer)
 		if onToken != nil {
-			return onToken(answer)
+			err = onToken(answer)
 		}
-		return nil
+		c.recordCall(ctx, cfg, "stream", countTextChars(req.System, req.User), utf8.RuneCountInString(response.String()), err, start)
+		return err
 	}
-	return streamer.ChatStream(ctx, req, onToken)
+	err = streamer.ChatStream(ctx, req, func(token string) error {
+		response.WriteString(token)
+		if onToken == nil {
+			return nil
+		}
+		return onToken(token)
+	})
+	c.recordCall(ctx, cfg, "stream", countTextChars(req.System, req.User), utf8.RuneCountInString(response.String()), err, start)
+	return err
 }
 
 func (c *dbBackedAIClient) activeClient(ctx context.Context) (AIClient, error) {
+	client, _, err := c.activeClientWithConfig(ctx)
+	return client, err
+}
+
+func (c *dbBackedAIClient) activeClientWithConfig(ctx context.Context) (AIClient, *models.AIModelConfig, error) {
 	cfg, err := (&AdminDataService{db: c.db}).ActiveAIModelConfig(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if cfg == nil {
-		return c.fallback, nil
+		return c.fallback, nil, nil
 	}
-	return aiClientFromConfig(*cfg), nil
+	return aiClientFromConfig(*cfg), cfg, nil
+}
+
+func (c *dbBackedAIClient) recordCall(ctx context.Context, cfg *models.AIModelConfig, operation string, requestChars, responseChars int, callErr error, start time.Time) {
+	if c == nil || c.db == nil {
+		return
+	}
+	status := "success"
+	errorMessage := ""
+	if callErr != nil {
+		status = "error"
+		errorMessage = friendlyAIError("", callErr)
+	}
+	provider, apiFormat, model := "fallback", "local", ""
+	if cfg != nil {
+		provider = cfg.Provider
+		apiFormat = cfg.APIFormat
+		if operation == "embed" {
+			model = cfg.EmbeddingModel
+		} else {
+			model = cfg.ChatModel
+		}
+	}
+	_ = (&AdminDataService{db: c.db}).RecordAIModelCallLog(ctx, AIModelCallLogInput{
+		Provider:         provider,
+		APIFormat:        apiFormat,
+		Model:            model,
+		Operation:        operation,
+		Status:           status,
+		LatencyMS:        time.Since(start).Milliseconds(),
+		PromptTokens:     approxTokens(requestChars),
+		CompletionTokens: approxTokens(responseChars),
+		RequestChars:     requestChars,
+		ResponseChars:    responseChars,
+		ErrorMessage:     errorMessage,
+	})
+}
+
+func countTextChars(values ...string) int {
+	total := 0
+	for _, value := range values {
+		total += utf8.RuneCountInString(value)
+	}
+	return total
+}
+
+func approxTokens(chars int) int {
+	if chars <= 0 {
+		return 0
+	}
+	return int(math.Ceil(float64(chars) / 4))
 }
 
 func aiClientFromConfig(cfg models.AIModelConfig) AIClient {

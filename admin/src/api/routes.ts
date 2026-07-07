@@ -115,6 +115,46 @@ const buildAdminRoutes = (user: GoUser) => {
         auths: ["ai:assistant"]
       }
     });
+    ragChildren.push({
+      path: "/rag/tuning",
+      component: "rag/tuning/index",
+      name: "RAGTuning",
+      meta: {
+        title: "调参中心",
+        icon: "ri:equalizer-line",
+        auths: ["ai:assistant"]
+      }
+    });
+    ragChildren.push({
+      path: "/rag/evals",
+      component: "rag/evals/index",
+      name: "RAGEvals",
+      meta: {
+        title: "评测中心",
+        icon: "ri:flask-line",
+        auths: ["ai:assistant"]
+      }
+    });
+    ragChildren.push({
+      path: "/rag/analytics",
+      component: "rag/analytics/index",
+      name: "RAGAnalytics",
+      meta: {
+        title: "命中分析",
+        icon: "ri:line-chart-line",
+        auths: ["ai:assistant"]
+      }
+    });
+    ragChildren.push({
+      path: "/rag/feedback",
+      component: "rag/feedback/index",
+      name: "RAGFeedback",
+      meta: {
+        title: "反馈处理",
+        icon: "ri:feedback-line",
+        auths: ["ai:assistant"]
+      }
+    });
   }
 
   if (hasAdminAccess && permissions.includes("ai:models:read")) {
@@ -126,6 +166,29 @@ const buildAdminRoutes = (user: GoUser) => {
         title: "大模型配置",
         icon: "ri:brain-line",
         auths: ["ai:models:read", "ai:models:write"]
+      }
+    });
+    ragChildren.push({
+      path: "/rag/ai-call-logs",
+      component: "rag/ai-call-logs/index",
+      name: "RAGAIModelCallLogs",
+      meta: {
+        title: "调用日志",
+        icon: "ri:file-search-line",
+        auths: ["ai:models:read"]
+      }
+    });
+  }
+
+  if (hasAdminAccess) {
+    toolChildren.push({
+      path: "/system-tools/settings",
+      component: "system-tools/settings/index",
+      name: "SystemToolsSettings",
+      meta: {
+        title: "系统配置中心",
+        icon: "ri:settings-3-line",
+        auths: ["admin:access"]
       }
     });
   }
@@ -205,6 +268,26 @@ const buildAdminRoutes = (user: GoUser) => {
         rank: 14
       },
       children: [
+        {
+          path: "/site-admin/operations",
+          component: "site-admin/operations/index",
+          name: "SiteAdminOperations",
+          meta: {
+            title: "运营仪表盘",
+            icon: "ri:dashboard-3-line",
+            auths: ["site:read"]
+          }
+        },
+        {
+          path: "/site-admin/projects",
+          component: "site-admin/projects/index",
+          name: "SiteAdminProjects",
+          meta: {
+            title: "项目作品",
+            icon: "ri:briefcase-4-line",
+            auths: ["site:read", "site:write"]
+          }
+        },
         {
           path: "/site-admin/content",
           component: "site-admin/content/index",

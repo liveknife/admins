@@ -404,6 +404,27 @@ func buildRouteSpecs(
 		{Method: "POST", Path: "/api/v1/admin/site/upload", Handler: adminCtrl.UploadSiteAsset, Auth: true, Permission: "site:write", Doc: docs.Op{Summary: "上传官网素材", Tags: []string{"Admin · Site"}}},
 	}
 
+	specs = append(specs,
+		routeSpec{Method: "PUT", Path: "/api/v1/admin/ai/rag/feedback/:id/status", Handler: adminCtrl.UpdateRAGFeedbackStatus, Auth: true, Permission: "ai:assistant", Doc: docs.Op{Summary: "处理 RAG 反馈状态", Tags: []string{"Admin 路 System"}, Body: docs.Body{Required: true, Schema: controllers.RAGFeedbackStatusRequest{}}}},
+		routeSpec{Method: "POST", Path: "/api/v1/admin/ai/rag/feedback/:id/eval-case", Handler: adminCtrl.ConvertRAGFeedbackToEvalCase, Auth: true, Permission: "ai:assistant", Doc: docs.Op{Summary: "RAG 反馈转评测用例", Tags: []string{"Admin 路 System"}}},
+		routeSpec{Method: "GET", Path: "/api/v1/admin/ai/rag/config", Handler: adminCtrl.RAGConfig, Auth: true, Permission: "ai:assistant", Doc: docs.Op{Summary: "RAG 检索调参配置", Tags: []string{"Admin 路 System"}}},
+		routeSpec{Method: "PUT", Path: "/api/v1/admin/ai/rag/config", Handler: adminCtrl.SaveRAGConfig, Auth: true, Permission: "ai:assistant", Doc: docs.Op{Summary: "保存 RAG 检索调参", Tags: []string{"Admin 路 System"}, Body: docs.Body{Required: true, Schema: models.RAGConfig{}}}},
+		routeSpec{Method: "GET", Path: "/api/v1/admin/ai/rag/analytics", Handler: adminCtrl.RAGAnalytics, Auth: true, Permission: "ai:assistant", Doc: docs.Op{Summary: "RAG 命中分析", Tags: []string{"Admin 路 System"}}},
+		routeSpec{Method: "GET", Path: "/api/v1/admin/ai/rag/eval-cases", Handler: adminCtrl.ListRAGEvalCases, Auth: true, Permission: "ai:assistant", Doc: docs.Op{Summary: "RAG 评测用例列表", Tags: []string{"Admin 路 System"}}},
+		routeSpec{Method: "POST", Path: "/api/v1/admin/ai/rag/eval-cases", Handler: adminCtrl.SaveRAGEvalCase, Auth: true, Permission: "ai:assistant", Doc: docs.Op{Summary: "创建 RAG 评测用例", Tags: []string{"Admin 路 System"}, Body: docs.Body{Required: true, Schema: models.RAGEvalCase{}}}},
+		routeSpec{Method: "PUT", Path: "/api/v1/admin/ai/rag/eval-cases/:id", Handler: adminCtrl.SaveRAGEvalCase, Auth: true, Permission: "ai:assistant", Doc: docs.Op{Summary: "更新 RAG 评测用例", Tags: []string{"Admin 路 System"}, Body: docs.Body{Required: true, Schema: models.RAGEvalCase{}}}},
+		routeSpec{Method: "DELETE", Path: "/api/v1/admin/ai/rag/eval-cases/:id", Handler: adminCtrl.DeleteRAGEvalCase, Auth: true, Permission: "ai:assistant", Doc: docs.Op{Summary: "删除 RAG 评测用例", Tags: []string{"Admin 路 System"}}},
+		routeSpec{Method: "GET", Path: "/api/v1/admin/ai/rag/evals/runs", Handler: adminCtrl.ListRAGEvalRuns, Auth: true, Permission: "ai:assistant", Doc: docs.Op{Summary: "RAG 评测运行历史", Tags: []string{"Admin 路 System"}}},
+	)
+
+	specs = append(specs,
+		routeSpec{Method: "GET", Path: "/api/v1/admin/ai/call-logs", Handler: adminCtrl.ListAIModelCallLogs, Auth: true, Permission: "ai:models:read", Doc: docs.Op{Summary: "AI 模型调用日志", Tags: []string{"Admin 路 System"}, Params: pageQuery}},
+		routeSpec{Method: "GET", Path: "/api/v1/admin/ai/call-stats", Handler: adminCtrl.AIModelCallStats, Auth: true, Permission: "ai:models:read", Doc: docs.Op{Summary: "AI 模型调用统计", Tags: []string{"Admin 路 System"}}},
+		routeSpec{Method: "GET", Path: "/api/v1/admin/system/settings", Handler: adminCtrl.ListSystemSettings, Auth: true, Permission: "admin:access", Doc: docs.Op{Summary: "系统配置中心", Tags: []string{"Admin 路 System"}}},
+		routeSpec{Method: "PUT", Path: "/api/v1/admin/system/settings", Handler: adminCtrl.SaveSystemSettings, Auth: true, Permission: "admin:access", Doc: docs.Op{Summary: "保存系统配置", Tags: []string{"Admin 路 System"}, Body: docs.Body{Required: true, Schema: controllers.SystemSettingsRequest{}}}},
+		routeSpec{Method: "GET", Path: "/api/v1/admin/site/operations", Handler: adminCtrl.SiteOperationsDashboard, Auth: true, Permission: "site:read", Doc: docs.Op{Summary: "官网运营仪表盘", Tags: []string{"Admin 路 Site"}}},
+	)
+
 	return specs
 }
 

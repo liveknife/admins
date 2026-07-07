@@ -29,6 +29,11 @@ const (
 	knowledgeVisibilityInternal = "internal"
 	defaultRAGTopK              = 6
 	defaultRAGMinScore          = 0.08
+	defaultRAGVectorWeight      = 0.58
+	defaultRAGBM25Weight        = 0.32
+	defaultRAGKeywordWeight     = 0.10
+	defaultRAGTitleBoost        = 0.04
+	ragConfigSettingKey         = "rag_config"
 )
 
 type RAGService struct {
@@ -67,6 +72,115 @@ type knowledgeChunk struct {
 
 func NewRAGService(db *sql.DB) *RAGService {
 	return &RAGService{db: db, ai: NewAIClient(db), top: envInt("RAG_TOP_K", defaultRAGTopK)}
+}
+
+func (r *RAGService) GetConfig(ctx context.Context) (*models.RAGConfig, error) {
+	cfg := defaultRAGConfig()
+	if r == nil || r.db == nil {
+		return cfg, nil
+	}
+	var raw string
+	var updatedAt sql.NullTime
+	err := database.QueryRowCtx(ctx, r.db, `SELECT setting_value,updated_at FROM rag_settings WHERE setting_key=$1`, ragConfigSettingKey).Scan(&raw, &updatedAt)
+	if err == sql.ErrNoRows {
+		return cfg, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(raw) != "" {
+		_ = json.Unmarshal([]byte(raw), cfg)
+	}
+	normalizeRAGConfig(cfg)
+	if updatedAt.Valid {
+		t := updatedAt.Time
+		cfg.UpdatedAt = &t
+	}
+	return cfg, nil
+}
+
+func (r *RAGService) SaveConfig(ctx context.Context, cfg models.RAGConfig) (*models.RAGConfig, error) {
+	normalizeRAGConfig(&cfg)
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, database.RewriteSQL(`DELETE FROM rag_settings WHERE setting_key=$1`), ragConfigSettingKey); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, database.RewriteSQL(`INSERT INTO rag_settings(setting_key,setting_value,updated_at) VALUES($1,$2,`+database.Now()+`)`), ragConfigSettingKey, string(raw)); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	r.top = cfg.TopK
+	return r.GetConfig(ctx)
+}
+
+func (r *RAGService) config(ctx context.Context) *models.RAGConfig {
+	cfg, err := r.GetConfig(ctx)
+	if err != nil || cfg == nil {
+		return defaultRAGConfig()
+	}
+	return cfg
+}
+
+func defaultRAGConfig() *models.RAGConfig {
+	cfg := &models.RAGConfig{
+		TopK:          envInt("RAG_TOP_K", defaultRAGTopK),
+		MinScore:      envFloat("RAG_MIN_SCORE", defaultRAGMinScore),
+		VectorWeight:  envFloat("RAG_VECTOR_WEIGHT", defaultRAGVectorWeight),
+		BM25Weight:    envFloat("RAG_BM25_WEIGHT", defaultRAGBM25Weight),
+		KeywordWeight: envFloat("RAG_KEYWORD_WEIGHT", defaultRAGKeywordWeight),
+		TitleBoost:    envFloat("RAG_TITLE_BOOST", defaultRAGTitleBoost),
+		SourceWeights: map[string]float64{
+			knowledgeSourceResource: envFloat("RAG_WEIGHT_RESOURCE", 1),
+			knowledgeSourceProject:  envFloat("RAG_WEIGHT_PROJECT", 1),
+			knowledgeSourceTech:     envFloat("RAG_WEIGHT_TECH", 1),
+			knowledgeSourceTimeline: envFloat("RAG_WEIGHT_TIMELINE", 1),
+			knowledgeSourceDocument: envFloat("RAG_WEIGHT_DOCUMENT", 1),
+		},
+	}
+	cfg.RerankTopN = envInt("RAG_RERANK_TOP_N", cfg.TopK*6)
+	normalizeRAGConfig(cfg)
+	return cfg
+}
+
+func normalizeRAGConfig(cfg *models.RAGConfig) {
+	if cfg.TopK <= 0 || cfg.TopK > 20 {
+		cfg.TopK = defaultRAGTopK
+	}
+	if cfg.MinScore < 0 || cfg.MinScore > 1 {
+		cfg.MinScore = defaultRAGMinScore
+	}
+	if cfg.RerankTopN < cfg.TopK {
+		cfg.RerankTopN = cfg.TopK * 6
+	}
+	if cfg.RerankTopN > 200 {
+		cfg.RerankTopN = 200
+	}
+	if cfg.VectorWeight <= 0 && cfg.BM25Weight <= 0 && cfg.KeywordWeight <= 0 {
+		cfg.VectorWeight = defaultRAGVectorWeight
+		cfg.BM25Weight = defaultRAGBM25Weight
+		cfg.KeywordWeight = defaultRAGKeywordWeight
+	}
+	if cfg.TitleBoost < 0 || cfg.TitleBoost > 1 {
+		cfg.TitleBoost = defaultRAGTitleBoost
+	}
+	if cfg.SourceWeights == nil {
+		cfg.SourceWeights = map[string]float64{}
+	}
+	for _, source := range []string{knowledgeSourceResource, knowledgeSourceProject, knowledgeSourceTech, knowledgeSourceTimeline, knowledgeSourceDocument} {
+		if cfg.SourceWeights[source] <= 0 {
+			cfg.SourceWeights[source] = 1
+		}
+	}
 }
 
 func (r *RAGService) SyncSiteResource(ctx context.Context, item *models.SiteResource) error {
@@ -129,13 +243,14 @@ func (r *RAGService) DeleteSource(ctx context.Context, sourceType string, source
 }
 
 func (r *RAGService) Stats(ctx context.Context) (*models.RAGIndexStats, error) {
+	cfg := r.config(ctx)
 	stats := &models.RAGIndexStats{
 		BySource:          map[string]int64{},
 		ByVisibility:      map[string]int64{},
-		TopK:              r.top,
-		MinScore:          r.minScore(),
-		RerankTopN:        r.rerankTopN(),
-		SourceWeights:     r.sourceWeights(),
+		TopK:              cfg.TopK,
+		MinScore:          cfg.MinScore,
+		RerankTopN:        cfg.RerankTopN,
+		SourceWeights:     cfg.SourceWeights,
 		ChatEnabled:       r.chatEnabled(ctx),
 		StreamingEnabled:  r.streamingEnabled(ctx),
 		VectorBackend:     r.vectorBackend(),
@@ -288,16 +403,25 @@ func (r *RAGService) ListQueryLogs(ctx context.Context, limit int) ([]models.RAG
 	return out, rows.Err()
 }
 
-func (r *RAGService) ListFeedback(ctx context.Context, limit int, rating string) ([]models.RAGFeedback, error) {
+func (r *RAGService) ListFeedback(ctx context.Context, limit int, rating, status string) ([]models.RAGFeedback, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 30
 	}
 	rating = strings.ToLower(strings.TrimSpace(rating))
-	query := `SELECT id,query_log_id,question,rating,comment,ip_address,user_agent,created_at FROM rag_feedback`
+	status = strings.ToLower(strings.TrimSpace(status))
+	query := `SELECT id,query_log_id,question,rating,comment,status,admin_note,converted_eval_case_id,handled_at,ip_address,user_agent,created_at FROM rag_feedback`
 	args := []any{}
+	clauses := []string{}
 	if rating == "up" || rating == "down" || rating == "neutral" {
-		query += ` WHERE rating=$1`
 		args = append(args, rating)
+		clauses = append(clauses, fmt.Sprintf("rating=$%d", len(args)))
+	}
+	if status == "open" || status == "triaged" || status == "resolved" || status == "ignored" {
+		args = append(args, status)
+		clauses = append(clauses, fmt.Sprintf("status=$%d", len(args)))
+	}
+	if len(clauses) > 0 {
+		query += " WHERE " + strings.Join(clauses, " AND ")
 	}
 	query += ` ORDER BY id DESC LIMIT $` + strconv.Itoa(len(args)+1)
 	args = append(args, limit)
@@ -310,12 +434,70 @@ func (r *RAGService) ListFeedback(ctx context.Context, limit int, rating string)
 	out := make([]models.RAGFeedback, 0)
 	for rows.Next() {
 		var item models.RAGFeedback
-		if err := rows.Scan(&item.ID, &item.QueryLogID, &item.Question, &item.Rating, &item.Comment, &item.IPAddress, &item.UserAgent, &item.CreatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.QueryLogID, &item.Question, &item.Rating, &item.Comment, &item.Status, &item.AdminNote, &item.ConvertedEvalCaseID, &item.HandledAt, &item.IPAddress, &item.UserAgent, &item.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, item)
 	}
 	return out, rows.Err()
+}
+
+func (r *RAGService) GetFeedback(ctx context.Context, id int64) (*models.RAGFeedback, error) {
+	rows, err := database.QueryCtx(ctx, r.db, `SELECT id,query_log_id,question,rating,comment,status,admin_note,converted_eval_case_id,handled_at,ip_address,user_agent,created_at FROM rag_feedback WHERE id=$1`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, sql.ErrNoRows
+	}
+	var item models.RAGFeedback
+	if err := rows.Scan(&item.ID, &item.QueryLogID, &item.Question, &item.Rating, &item.Comment, &item.Status, &item.AdminNote, &item.ConvertedEvalCaseID, &item.HandledAt, &item.IPAddress, &item.UserAgent, &item.CreatedAt); err != nil {
+		return nil, err
+	}
+	return &item, rows.Err()
+}
+
+func (r *RAGService) UpdateFeedbackStatus(ctx context.Context, id int64, status, note string) (*models.RAGFeedback, error) {
+	status = strings.ToLower(strings.TrimSpace(status))
+	switch status {
+	case "open", "triaged", "resolved", "ignored":
+	default:
+		status = "triaged"
+	}
+	note = limitRunes(note, 2000)
+	handledExpr := "NULL"
+	if status != "open" {
+		handledExpr = database.Now()
+	}
+	if _, err := database.ExecCtx(ctx, r.db, `UPDATE rag_feedback SET status=$1,admin_note=$2,handled_at=`+handledExpr+` WHERE id=$3`, status, note, id); err != nil {
+		return nil, err
+	}
+	return r.GetFeedback(ctx, id)
+}
+
+func (r *RAGService) ConvertFeedbackToEvalCase(ctx context.Context, id int64) (*models.RAGEvalCase, error) {
+	feedback, err := r.GetFeedback(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	caseID := fmt.Sprintf("feedback-%d", feedback.ID)
+	item := models.RAGEvalCase{
+		ID:              caseID,
+		Question:        feedback.Question,
+		ExpectedSources: nil,
+		ExpectedTerms:   uniqueStrings(tokenizeQuery(feedback.Comment)),
+		Enabled:         true,
+	}
+	if len(item.ExpectedTerms) > 6 {
+		item.ExpectedTerms = item.ExpectedTerms[:6]
+	}
+	saved, err := r.SaveEvalCase(ctx, item)
+	if err != nil {
+		return nil, err
+	}
+	_, _ = database.ExecCtx(ctx, r.db, `UPDATE rag_feedback SET status='resolved',converted_eval_case_id=$1,handled_at=`+database.Now()+` WHERE id=$2`, saved.ID, id)
+	return saved, nil
 }
 
 func (r *RAGService) ListChunks(ctx context.Context, sourceType string, sourceID int64, limit int) ([]models.KnowledgeChunkPreview, error) {
@@ -358,11 +540,14 @@ func (r *RAGService) SearchDiagnostics(ctx context.Context, question string, inc
 	if err != nil {
 		return nil, err
 	}
-	return chunksToSources(chunks, question), nil
+	return r.chunksToSources(ctx, chunks, question), nil
 }
 
 func (r *RAGService) RunEval(ctx context.Context, includeInternal bool) (*models.RAGEvalRun, error) {
-	cases := loadRAGEvalCases()
+	cases, err := r.ListEvalCases(ctx, true)
+	if err != nil || len(cases) == 0 {
+		cases = loadRAGEvalCases()
+	}
 	run := &models.RAGEvalRun{
 		Total:     len(cases),
 		Results:   make([]models.RAGEvalCaseResult, 0, len(cases)),
@@ -370,11 +555,11 @@ func (r *RAGService) RunEval(ctx context.Context, includeInternal bool) (*models
 	}
 	for _, item := range cases {
 		start := time.Now()
-		chunks, err := r.search(ctx, item.Question, r.top, includeInternal)
+		chunks, err := r.search(ctx, item.Question, r.config(ctx).TopK, includeInternal)
 		if err != nil {
 			return nil, err
 		}
-		sources := chunksToSources(chunks, item.Question)
+		sources := r.chunksToSources(ctx, chunks, item.Question)
 		answer := r.extractiveAnswer(item.Question, chunks)
 		if r.chatEnabled(ctx) {
 			if generated, err := r.generateAnswer(ctx, item.Question, chunks); err == nil && strings.TrimSpace(generated) != "" {
@@ -407,7 +592,215 @@ func (r *RAGService) RunEval(ctx context.Context, includeInternal bool) (*models
 		run.AverageQuality = math.Round(run.AverageQuality/float64(run.Total)*10000) / 10000
 		run.AverageLatencyMs = math.Round(run.AverageLatencyMs/float64(run.Total)*100) / 100
 	}
+	_ = r.saveEvalRun(ctx, run)
 	return run, nil
+}
+
+func (r *RAGService) ListEvalCases(ctx context.Context, onlyEnabled bool) ([]models.RAGEvalCase, error) {
+	where := ""
+	if onlyEnabled {
+		where = " WHERE enabled=TRUE"
+	}
+	rows, err := database.QueryCtx(ctx, r.db, `SELECT id,question,expected_sources,expected_terms,enabled,created_at,updated_at FROM rag_eval_cases`+where+` ORDER BY updated_at DESC,id ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]models.RAGEvalCase, 0)
+	for rows.Next() {
+		var item models.RAGEvalCase
+		var rawSources, rawTerms string
+		var createdAt, updatedAt time.Time
+		if err := rows.Scan(&item.ID, &item.Question, &rawSources, &rawTerms, &item.Enabled, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		item.ExpectedSources = decodeStringList(rawSources)
+		item.ExpectedTerms = decodeStringList(rawTerms)
+		item.CreatedAt = &createdAt
+		item.UpdatedAt = &updatedAt
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(out) == 0 && !onlyEnabled {
+		return loadRAGEvalCases(), nil
+	}
+	return out, nil
+}
+
+func (r *RAGService) SaveEvalCase(ctx context.Context, item models.RAGEvalCase) (*models.RAGEvalCase, error) {
+	item.ID = strings.TrimSpace(item.ID)
+	if item.ID == "" {
+		item.ID = fmt.Sprintf("case-%d", time.Now().UnixNano())
+	}
+	item.Question = strings.TrimSpace(item.Question)
+	if item.Question == "" {
+		return nil, fmt.Errorf("question is required")
+	}
+	rawSources, _ := json.Marshal(uniqueStrings(item.ExpectedSources))
+	rawTerms, _ := json.Marshal(uniqueStrings(item.ExpectedTerms))
+	if _, err := database.ExecCtx(ctx, r.db, `DELETE FROM rag_eval_cases WHERE id=$1`, item.ID); err != nil {
+		return nil, err
+	}
+	if _, err := database.ExecCtx(ctx, r.db, `INSERT INTO rag_eval_cases(id,question,expected_sources,expected_terms,enabled,created_at,updated_at) VALUES($1,$2,$3,$4,$5,`+database.Now()+`,`+database.Now()+`)`, item.ID, item.Question, string(rawSources), string(rawTerms), item.Enabled); err != nil {
+		return nil, err
+	}
+	cases, err := r.ListEvalCases(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+	for _, saved := range cases {
+		if saved.ID == item.ID {
+			return &saved, nil
+		}
+	}
+	return &item, nil
+}
+
+func (r *RAGService) DeleteEvalCase(ctx context.Context, id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil
+	}
+	_, err := database.ExecCtx(ctx, r.db, `DELETE FROM rag_eval_cases WHERE id=$1`, id)
+	return err
+}
+
+func (r *RAGService) ListEvalRuns(ctx context.Context, limit int) ([]models.RAGEvalRunSummary, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	rows, err := database.QueryCtx(ctx, r.db, `SELECT id,total,matched,recall_hits,average_top_score,average_quality,average_latency_ms,created_at FROM rag_eval_runs ORDER BY id DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]models.RAGEvalRunSummary, 0)
+	for rows.Next() {
+		var item models.RAGEvalRunSummary
+		if err := rows.Scan(&item.ID, &item.Total, &item.Matched, &item.RecallHits, &item.AverageTopScore, &item.AverageQuality, &item.AverageLatencyMs, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (r *RAGService) saveEvalRun(ctx context.Context, run *models.RAGEvalRun) error {
+	if run == nil {
+		return nil
+	}
+	raw, _ := json.Marshal(run.Results)
+	query := `INSERT INTO rag_eval_runs(total,matched,recall_hits,average_top_score,average_quality,average_latency_ms,result_json,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,` + database.Now() + `) RETURNING id`
+	args := []any{run.Total, run.Matched, run.RecallHits, run.AverageTopScore, run.AverageQuality, run.AverageLatencyMs, string(raw)}
+	if database.CurrentDialect != nil && database.CurrentDialect.SupportsReturning() {
+		return database.QueryRowCtx(ctx, r.db, query, args...).Scan(&run.ID)
+	}
+	result, err := database.ExecCtx(ctx, r.db, strings.Replace(query, " RETURNING id", "", 1), args...)
+	if err != nil {
+		return err
+	}
+	run.ID, _ = result.LastInsertId()
+	return nil
+}
+
+func (r *RAGService) Analytics(ctx context.Context, limit int) (*models.RAGAnalytics, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 500
+	}
+	logs, err := r.ListQueryLogs(ctx, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := &models.RAGAnalytics{
+		SourceMetrics: make([]models.RAGSourceMetric, 0),
+		DailyMetrics:  make([]models.RAGDailyMetric, 0),
+		LowConfidence: make([]models.RAGQueryLog, 0),
+		NoHitQueries:  make([]models.RAGQueryLog, 0),
+	}
+	sourceAgg := map[string]*models.RAGSourceMetric{}
+	daily := map[string]*struct {
+		queries int64
+		hits    int64
+		latency float64
+	}{}
+	minScore := r.config(ctx).MinScore
+	for _, item := range logs {
+		out.QueryCount++
+		out.AvgLatencyMs += float64(item.LatencyMs)
+		out.AvgSourceCount += float64(item.SourceCount)
+		out.AvgTopScore += item.TopScore
+		if item.Matched {
+			out.HitCount++
+		}
+		if item.Matched && item.TopScore < minScore+0.05 && len(out.LowConfidence) < 20 {
+			out.LowConfidence = append(out.LowConfidence, item)
+		}
+		if !item.Matched && len(out.NoHitQueries) < 20 {
+			out.NoHitQueries = append(out.NoHitQueries, item)
+		}
+		day := item.CreatedAt.Format("2006-01-02")
+		if daily[day] == nil {
+			daily[day] = &struct {
+				queries int64
+				hits    int64
+				latency float64
+			}{}
+		}
+		daily[day].queries++
+		if item.Matched {
+			daily[day].hits++
+		}
+		daily[day].latency += float64(item.LatencyMs)
+
+		var sources []models.KnowledgeSource
+		_ = json.Unmarshal([]byte(item.SourceJSON), &sources)
+		for rank, source := range sources {
+			key := source.SourceType
+			if key == "" {
+				key = "unknown"
+			}
+			if sourceAgg[key] == nil {
+				sourceAgg[key] = &models.RAGSourceMetric{Name: key}
+			}
+			metric := sourceAgg[key]
+			metric.ChunkHits++
+			metric.Hits++
+			metric.AvgScore += source.Score
+			metric.AvgRank += float64(rank + 1)
+		}
+	}
+	if out.QueryCount > 0 {
+		out.HitRate = math.Round(float64(out.HitCount)/float64(out.QueryCount)*10000) / 10000
+		out.AvgLatencyMs = math.Round(out.AvgLatencyMs/float64(out.QueryCount)*100) / 100
+		out.AvgSourceCount = math.Round(out.AvgSourceCount/float64(out.QueryCount)*100) / 100
+		out.AvgTopScore = math.Round(out.AvgTopScore/float64(out.QueryCount)*10000) / 10000
+	}
+	for _, metric := range sourceAgg {
+		metric.Queries = out.QueryCount
+		if metric.ChunkHits > 0 {
+			metric.AvgScore = math.Round(metric.AvgScore/float64(metric.ChunkHits)*10000) / 10000
+			metric.AvgRank = math.Round(metric.AvgRank/float64(metric.ChunkHits)*100) / 100
+		}
+		out.SourceMetrics = append(out.SourceMetrics, *metric)
+	}
+	sort.Slice(out.SourceMetrics, func(i, j int) bool { return out.SourceMetrics[i].ChunkHits > out.SourceMetrics[j].ChunkHits })
+	days := make([]string, 0, len(daily))
+	for day := range daily {
+		days = append(days, day)
+	}
+	sort.Strings(days)
+	for _, day := range days {
+		item := daily[day]
+		metric := models.RAGDailyMetric{Date: day, Queries: item.queries}
+		if item.queries > 0 {
+			metric.HitRate = math.Round(float64(item.hits)/float64(item.queries)*10000) / 10000
+			metric.AvgLatency = math.Round(item.latency/float64(item.queries)*100) / 100
+		}
+		out.DailyMetrics = append(out.DailyMetrics, metric)
+	}
+	return out, nil
 }
 
 func (r *RAGService) AskSiteKnowledge(ctx context.Context, question string, fallback func(context.Context, string) (*models.SiteKnowledgeAnswer, error)) (*models.SiteKnowledgeAnswer, error) {
@@ -418,7 +811,7 @@ func (r *RAGService) AskSiteKnowledge(ctx context.Context, question string, fall
 	}
 
 	_ = r.ensureInitialIndex(ctx)
-	matches, err := r.search(ctx, question, r.top, false)
+	matches, err := r.search(ctx, question, r.config(ctx).TopK, false)
 	if err != nil || len(matches) == 0 {
 		if fallback != nil {
 			answer, fallbackErr := fallback(ctx, question)
@@ -441,7 +834,7 @@ func (r *RAGService) AskSiteKnowledge(ctx context.Context, question string, fall
 	}
 
 	resources, projects := r.sourcesToLegacyMatches(ctx, matches)
-	sources := chunksToSources(matches, question)
+	sources := r.chunksToSources(ctx, matches, question)
 	queryLogID := r.logQuery(ctx, question, answer, sources, true, time.Since(start), usedChat)
 	return &models.SiteKnowledgeAnswer{
 		Question:    question,
@@ -466,7 +859,7 @@ func (r *RAGService) AskSiteKnowledgeStream(ctx context.Context, question string
 	}
 
 	_ = r.ensureInitialIndex(ctx)
-	matches, err := r.search(ctx, question, r.top, false)
+	matches, err := r.search(ctx, question, r.config(ctx).TopK, false)
 	if err != nil || len(matches) == 0 {
 		if fallback != nil {
 			answer, fallbackErr := fallback(ctx, question)
@@ -487,7 +880,7 @@ func (r *RAGService) AskSiteKnowledgeStream(ctx context.Context, question string
 	}
 
 	resources, projects := r.sourcesToLegacyMatches(ctx, matches)
-	sources := chunksToSources(matches, question)
+	sources := r.chunksToSources(ctx, matches, question)
 	answer := ""
 	usedChat := false
 	if r.chatEnabled(ctx) {
@@ -541,7 +934,7 @@ func (r *RAGService) AskAdminKnowledge(ctx context.Context, question string) (*m
 		return nil, false, nil
 	}
 	_ = r.ensureInitialIndex(ctx)
-	matches, err := r.search(ctx, question, r.top, true)
+	matches, err := r.search(ctx, question, r.config(ctx).TopK, true)
 	if err != nil {
 		return nil, false, err
 	}
@@ -557,7 +950,7 @@ func (r *RAGService) AskAdminKnowledge(ctx context.Context, question string) (*m
 			usedChat = true
 		}
 	}
-	sources := chunksToSources(matches, question)
+	sources := r.chunksToSources(ctx, matches, question)
 	result := &models.AIAssistantResult{
 		Question: question,
 		Answer:   answer,
@@ -743,6 +1136,10 @@ func (r *RAGService) hasActiveChunks(ctx context.Context, sourceType string) boo
 }
 
 func (r *RAGService) search(ctx context.Context, question string, topK int, includeInternal bool) ([]knowledgeChunk, error) {
+	cfg := r.config(ctx)
+	if topK <= 0 || topK > 20 {
+		topK = cfg.TopK
+	}
 	queryEmbedding, err := r.ai.Embed(ctx, []string{question})
 	if err != nil {
 		return nil, err
@@ -766,7 +1163,7 @@ func (r *RAGService) search(ctx context.Context, question string, topK int, incl
 	defer rows.Close()
 
 	terms := tokenizeQuery(question)
-	minScore := r.minScore()
+	minScore := cfg.MinScore
 	items := make([]knowledgeChunk, 0)
 	for rows.Next() {
 		var item knowledgeChunk
@@ -785,7 +1182,7 @@ func (r *RAGService) search(ctx context.Context, question string, topK int, incl
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	items = r.rerank(question, items)
+	items = r.rerank(ctx, question, items)
 	filtered := items[:0]
 	for _, item := range items {
 		if item.Score >= minScore {
@@ -793,9 +1190,6 @@ func (r *RAGService) search(ctx context.Context, question string, topK int, incl
 		}
 	}
 	items = filtered
-	if topK <= 0 || topK > defaultRAGTopK*2 {
-		topK = defaultRAGTopK
-	}
 	if len(items) > topK {
 		items = items[:topK]
 	}
@@ -803,8 +1197,9 @@ func (r *RAGService) search(ctx context.Context, question string, topK int, incl
 }
 
 func (r *RAGService) searchPGVector(ctx context.Context, question string, embedding []float64, topK int, includeInternal bool) ([]knowledgeChunk, error) {
-	if topK <= 0 || topK > defaultRAGTopK*2 {
-		topK = defaultRAGTopK
+	cfg := r.config(ctx)
+	if topK <= 0 || topK > 20 {
+		topK = cfg.TopK
 	}
 	visibilitySQL := `visibility='public'`
 	if includeInternal {
@@ -816,7 +1211,7 @@ func (r *RAGService) searchPGVector(ctx context.Context, question string, embedd
 	}
 	defer rows.Close()
 	terms := tokenizeQuery(question)
-	minScore := r.minScore()
+	minScore := cfg.MinScore
 	items := make([]knowledgeChunk, 0)
 	for rows.Next() {
 		var item knowledgeChunk
@@ -834,7 +1229,7 @@ func (r *RAGService) searchPGVector(ctx context.Context, question string, embedd
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	items = r.rerank(question, items)
+	items = r.rerank(ctx, question, items)
 	filtered := items[:0]
 	for _, item := range items {
 		if item.Score >= minScore {
@@ -848,23 +1243,28 @@ func (r *RAGService) searchPGVector(ctx context.Context, question string, embedd
 	return items, nil
 }
 
-func (r *RAGService) rerank(question string, items []knowledgeChunk) []knowledgeChunk {
+func (r *RAGService) rerank(ctx context.Context, question string, items []knowledgeChunk) []knowledgeChunk {
 	if len(items) == 0 {
 		return items
 	}
+	cfg := r.config(ctx)
 	terms := tokenizeQuery(question)
 	bm25Scores := bm25Scores(terms, items)
-	weights := r.sourceWeights()
+	weights := cfg.SourceWeights
+	totalWeight := cfg.VectorWeight + cfg.BM25Weight + cfg.KeywordWeight
+	if totalWeight <= 0 {
+		totalWeight = defaultRAGVectorWeight + defaultRAGBM25Weight + defaultRAGKeywordWeight
+	}
 	for i := range items {
 		items[i].BM25Score = bm25Scores[i]
 		items[i].SourceWeight = weights[items[i].SourceType]
 		if items[i].SourceWeight <= 0 {
 			items[i].SourceWeight = 1
 		}
-		base := items[i].VectorScore*0.58 + items[i].BM25Score*0.32 + items[i].KeywordScore*0.10
+		base := (items[i].VectorScore*cfg.VectorWeight + items[i].BM25Score*cfg.BM25Weight + items[i].KeywordScore*cfg.KeywordWeight) / totalWeight
 		titleBoost := 0.0
 		if scoreText(strings.ToLower(items[i].Title), terms) > 0 {
-			titleBoost = 0.04
+			titleBoost = cfg.TitleBoost
 		}
 		items[i].RerankScore = math.Min((base+titleBoost)*items[i].SourceWeight, 1.5)
 		items[i].Score = items[i].RerankScore
@@ -875,7 +1275,7 @@ func (r *RAGService) rerank(question string, items []knowledgeChunk) []knowledge
 		}
 		return items[i].Score > items[j].Score
 	})
-	if n := r.rerankTopN(); n > 0 && len(items) > n {
+	if n := cfg.RerankTopN; n > 0 && len(items) > n {
 		items = items[:n]
 	}
 	return items
@@ -1199,10 +1599,10 @@ func splitText(text string, size, overlap int) []string {
 	return out
 }
 
-func chunksToSources(chunks []knowledgeChunk, question string) []models.KnowledgeSource {
+func (r *RAGService) chunksToSources(ctx context.Context, chunks []knowledgeChunk, question string) []models.KnowledgeSource {
 	out := make([]models.KnowledgeSource, 0, len(chunks))
 	terms := tokenizeQuery(question)
-	minScore := envFloat("RAG_MIN_SCORE", defaultRAGMinScore)
+	minScore := r.config(ctx).MinScore
 	for index, chunk := range chunks {
 		out = append(out, models.KnowledgeSource{
 			ChunkID:         chunk.ID,
@@ -1339,15 +1739,30 @@ func loadRAGEvalCases() []models.RAGEvalCase {
 	if raw != "" {
 		var cases []models.RAGEvalCase
 		if json.Unmarshal([]byte(raw), &cases) == nil && len(cases) > 0 {
+			for i := range cases {
+				cases[i].Enabled = true
+			}
 			return cases
 		}
 	}
 	return []models.RAGEvalCase{
-		{ID: "site-stack", Question: "这个项目使用了哪些前后端技术？", ExpectedSources: []string{knowledgeSourceTech, knowledgeSourceProject}, ExpectedTerms: []string{"Go", "Vue"}},
-		{ID: "site-projects", Question: "有哪些可以展示的项目经验？", ExpectedSources: []string{knowledgeSourceProject}, ExpectedTerms: []string{"项目"}},
-		{ID: "learning-notes", Question: "有没有学习笔记或文章可以继续看？", ExpectedSources: []string{knowledgeSourceResource}, ExpectedTerms: []string{"学习", "文章"}},
-		{ID: "timeline", Question: "最近的成长时间线有哪些关键节点？", ExpectedSources: []string{knowledgeSourceTimeline}, ExpectedTerms: []string{"时间线", "阶段"}},
+		{ID: "site-stack", Question: "这个项目使用了哪些前后端技术？", ExpectedSources: []string{knowledgeSourceTech, knowledgeSourceProject}, ExpectedTerms: []string{"Go", "Vue"}, Enabled: true},
+		{ID: "site-projects", Question: "有哪些可以展示的项目经验？", ExpectedSources: []string{knowledgeSourceProject}, ExpectedTerms: []string{"项目"}, Enabled: true},
+		{ID: "learning-notes", Question: "有没有学习笔记或文章可以继续看？", ExpectedSources: []string{knowledgeSourceResource}, ExpectedTerms: []string{"学习", "文章"}, Enabled: true},
+		{ID: "timeline", Question: "最近的成长时间线有哪些关键节点？", ExpectedSources: []string{knowledgeSourceTimeline}, ExpectedTerms: []string{"时间线", "阶段"}, Enabled: true},
 	}
+}
+
+func decodeStringList(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var values []string
+	if json.Unmarshal([]byte(raw), &values) == nil {
+		return uniqueStrings(values)
+	}
+	return uniqueStrings(strings.Split(raw, ","))
 }
 
 func evalRecallHit(item models.RAGEvalCase, sources []models.KnowledgeSource) bool {
@@ -1509,28 +1924,6 @@ func (r *RAGService) canUsePGVector(ctx context.Context, embedding []float64) bo
 
 func (r *RAGService) vectorDim() int {
 	return envInt("RAG_VECTOR_DIM", 256)
-}
-
-func (r *RAGService) minScore() float64 {
-	return envFloat("RAG_MIN_SCORE", defaultRAGMinScore)
-}
-
-func (r *RAGService) rerankTopN() int {
-	value := envInt("RAG_RERANK_TOP_N", r.top*6)
-	if value < r.top {
-		return r.top
-	}
-	return value
-}
-
-func (r *RAGService) sourceWeights() map[string]float64 {
-	return map[string]float64{
-		knowledgeSourceResource: envFloat("RAG_WEIGHT_RESOURCE", 1),
-		knowledgeSourceProject:  envFloat("RAG_WEIGHT_PROJECT", 1),
-		knowledgeSourceTech:     envFloat("RAG_WEIGHT_TECH", 1),
-		knowledgeSourceTimeline: envFloat("RAG_WEIGHT_TIMELINE", 1),
-		knowledgeSourceDocument: envFloat("RAG_WEIGHT_DOCUMENT", 1),
-	}
 }
 
 func (r *RAGService) streamingEnabled(ctx context.Context) bool {

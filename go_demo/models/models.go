@@ -168,6 +168,63 @@ type AIModelConfig struct {
 	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
+type SystemSetting struct {
+	ID           int64     `json:"id"`
+	SettingKey   string    `json:"setting_key"`
+	SettingValue string    `json:"setting_value"`
+	GroupName    string    `json:"group_name"`
+	ValueType    string    `json:"value_type"`
+	Description  string    `json:"description"`
+	IsSecret     bool      `json:"is_secret"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type AIModelCallLog struct {
+	ID               int64     `json:"id"`
+	Provider         string    `json:"provider"`
+	APIFormat        string    `json:"api_format"`
+	Model            string    `json:"model"`
+	Operation        string    `json:"operation"`
+	Status           string    `json:"status"`
+	LatencyMS        int64     `json:"latency_ms"`
+	PromptTokens     int       `json:"prompt_tokens"`
+	CompletionTokens int       `json:"completion_tokens"`
+	RequestChars     int       `json:"request_chars"`
+	ResponseChars    int       `json:"response_chars"`
+	ErrorMessage     string    `json:"error_message"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
+type AIModelCallDailyStat struct {
+	Date   string `json:"date"`
+	Calls  int64  `json:"calls"`
+	Errors int64  `json:"errors"`
+	AvgMS  int64  `json:"avg_ms"`
+	Tokens int64  `json:"tokens"`
+}
+
+type AIModelCallModelStat struct {
+	Model    string `json:"model"`
+	Calls    int64  `json:"calls"`
+	Errors   int64  `json:"errors"`
+	AvgMS    int64  `json:"avg_ms"`
+	Tokens   int64  `json:"tokens"`
+	Provider string `json:"provider"`
+}
+
+type AIModelCallStats struct {
+	TotalCalls   int64                  `json:"total_calls"`
+	SuccessCalls int64                  `json:"success_calls"`
+	ErrorCalls   int64                  `json:"error_calls"`
+	AvgLatencyMS int64                  `json:"avg_latency_ms"`
+	TotalTokens  int64                  `json:"total_tokens"`
+	TodayCalls   int64                  `json:"today_calls"`
+	DailyStats   []AIModelCallDailyStat `json:"daily_stats"`
+	ModelStats   []AIModelCallModelStat `json:"model_stats"`
+	RecentErrors []AIModelCallLog       `json:"recent_errors"`
+	GeneratedAt  time.Time              `json:"generated_at"`
+}
+
 type SystemHealth struct {
 	Status    string          `json:"status"`
 	CPU       HealthMetric    `json:"cpu"`
@@ -284,9 +341,18 @@ type SiteProject struct {
 	DemoURL     string     `json:"demo_url"`
 	RepoURL     string     `json:"repo_url"`
 	StackTags   string     `json:"stack_tags"`
+	Role        string     `json:"role"`
+	Highlights  string     `json:"highlights"`
+	Metrics     string     `json:"metrics"`
+	Challenge   string     `json:"challenge"`
+	Solution    string     `json:"solution"`
+	GalleryJSON string     `json:"gallery_json"`
 	Status      string     `json:"status"`
 	IsFeatured  bool       `json:"is_featured"`
 	SortOrder   int        `json:"sort_order"`
+	Priority    int        `json:"priority"`
+	StartDate   *time.Time `json:"start_date,omitempty"`
+	EndDate     *time.Time `json:"end_date,omitempty"`
 	PublishedAt *time.Time `json:"published_at,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
@@ -409,11 +475,26 @@ type RAGIndexStats struct {
 	NegativeFeedback   int64              `json:"negative_feedback"`
 }
 
+type RAGConfig struct {
+	TopK          int                `json:"top_k"`
+	MinScore      float64            `json:"min_score"`
+	RerankTopN    int                `json:"rerank_top_n"`
+	VectorWeight  float64            `json:"vector_weight"`
+	BM25Weight    float64            `json:"bm25_weight"`
+	KeywordWeight float64            `json:"keyword_weight"`
+	TitleBoost    float64            `json:"title_boost"`
+	SourceWeights map[string]float64 `json:"source_weights"`
+	UpdatedAt     *time.Time         `json:"updated_at,omitempty"`
+}
+
 type RAGEvalCase struct {
-	ID              string   `json:"id"`
-	Question        string   `json:"question"`
-	ExpectedSources []string `json:"expected_sources,omitempty"`
-	ExpectedTerms   []string `json:"expected_terms,omitempty"`
+	ID              string     `json:"id"`
+	Question        string     `json:"question"`
+	ExpectedSources []string   `json:"expected_sources,omitempty"`
+	ExpectedTerms   []string   `json:"expected_terms,omitempty"`
+	Enabled         bool       `json:"enabled"`
+	CreatedAt       *time.Time `json:"created_at,omitempty"`
+	UpdatedAt       *time.Time `json:"updated_at,omitempty"`
 }
 
 type RAGEvalCaseResult struct {
@@ -428,6 +509,7 @@ type RAGEvalCaseResult struct {
 }
 
 type RAGEvalRun struct {
+	ID               int64               `json:"id,omitempty"`
 	Total            int                 `json:"total"`
 	Matched          int                 `json:"matched"`
 	RecallHits       int                 `json:"recall_hits"`
@@ -436,6 +518,46 @@ type RAGEvalRun struct {
 	AverageLatencyMs float64             `json:"average_latency_ms"`
 	Results          []RAGEvalCaseResult `json:"results"`
 	CreatedAt        time.Time           `json:"created_at"`
+}
+
+type RAGEvalRunSummary struct {
+	ID               int64     `json:"id"`
+	Total            int       `json:"total"`
+	Matched          int       `json:"matched"`
+	RecallHits       int       `json:"recall_hits"`
+	AverageTopScore  float64   `json:"average_top_score"`
+	AverageQuality   float64   `json:"average_quality"`
+	AverageLatencyMs float64   `json:"average_latency_ms"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
+type RAGSourceMetric struct {
+	Name      string  `json:"name"`
+	Queries   int64   `json:"queries"`
+	Hits      int64   `json:"hits"`
+	AvgScore  float64 `json:"avg_score"`
+	AvgRank   float64 `json:"avg_rank"`
+	ChunkHits int64   `json:"chunk_hits"`
+}
+
+type RAGDailyMetric struct {
+	Date       string  `json:"date"`
+	Queries    int64   `json:"queries"`
+	HitRate    float64 `json:"hit_rate"`
+	AvgLatency float64 `json:"avg_latency"`
+}
+
+type RAGAnalytics struct {
+	QueryCount     int64             `json:"query_count"`
+	HitCount       int64             `json:"hit_count"`
+	HitRate        float64           `json:"hit_rate"`
+	AvgLatencyMs   float64           `json:"avg_latency_ms"`
+	AvgSourceCount float64           `json:"avg_source_count"`
+	AvgTopScore    float64           `json:"avg_top_score"`
+	SourceMetrics  []RAGSourceMetric `json:"source_metrics"`
+	DailyMetrics   []RAGDailyMetric  `json:"daily_metrics"`
+	LowConfidence  []RAGQueryLog     `json:"low_confidence"`
+	NoHitQueries   []RAGQueryLog     `json:"no_hit_queries"`
 }
 
 type RAGIndexJob struct {
@@ -465,14 +587,18 @@ type RAGQueryLog struct {
 }
 
 type RAGFeedback struct {
-	ID         int64     `json:"id"`
-	QueryLogID int64     `json:"query_log_id"`
-	Question   string    `json:"question"`
-	Rating     string    `json:"rating"`
-	Comment    string    `json:"comment"`
-	IPAddress  string    `json:"ip_address,omitempty"`
-	UserAgent  string    `json:"user_agent,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID                  int64      `json:"id"`
+	QueryLogID          int64      `json:"query_log_id"`
+	Question            string     `json:"question"`
+	Rating              string     `json:"rating"`
+	Comment             string     `json:"comment"`
+	Status              string     `json:"status"`
+	AdminNote           string     `json:"admin_note"`
+	ConvertedEvalCaseID string     `json:"converted_eval_case_id,omitempty"`
+	HandledAt           *time.Time `json:"handled_at,omitempty"`
+	IPAddress           string     `json:"ip_address,omitempty"`
+	UserAgent           string     `json:"user_agent,omitempty"`
+	CreatedAt           time.Time  `json:"created_at"`
 }
 
 type UploadedDocument struct {
@@ -516,6 +642,25 @@ type SiteAnalytics struct {
 	TopPages        []SiteVisitTopPage `json:"top_pages"`
 	DeviceStats     []SiteVisitDevice  `json:"device_stats"`
 	TopArticles     []SiteResource     `json:"top_articles"`
+}
+
+type SiteContentHealthItem struct {
+	Label string `json:"label"`
+	Value int64  `json:"value"`
+	Tone  string `json:"tone"`
+}
+
+type SiteOperationsDashboard struct {
+	Analytics         SiteAnalytics           `json:"analytics"`
+	PublishedProjects int64                   `json:"published_projects"`
+	DraftProjects     int64                   `json:"draft_projects"`
+	FeaturedProjects  int64                   `json:"featured_projects"`
+	DraftResources    int64                   `json:"draft_resources"`
+	ConversionRate    float64                 `json:"conversion_rate"`
+	TopProjects       []SiteProject           `json:"top_projects"`
+	RecentMessages    []SiteMessage           `json:"recent_messages"`
+	ContentHealth     []SiteContentHealthItem `json:"content_health"`
+	GeneratedAt       time.Time               `json:"generated_at"`
 }
 
 type HealthMetric struct {

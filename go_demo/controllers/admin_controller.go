@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"go-demo/models"
 	"go-demo/services"
 
 	"github.com/gin-gonic/gin"
@@ -70,6 +71,11 @@ type RAGDiagnosticsRequest struct {
 
 type DocumentVisibilityRequest struct {
 	Visibility string `json:"visibility" form:"visibility" binding:"required"`
+}
+
+type RAGFeedbackStatusRequest struct {
+	Status    string `json:"status" form:"status"`
+	AdminNote string `json:"admin_note" form:"admin_note"`
 }
 
 type AIModelConfigRequest struct {
@@ -199,9 +205,18 @@ type SiteProjectRequest struct {
 	DemoURL     string     `json:"demo_url" form:"demo_url"`
 	RepoURL     string     `json:"repo_url" form:"repo_url"`
 	StackTags   string     `json:"stack_tags" form:"stack_tags"`
+	Role        string     `json:"role" form:"role"`
+	Highlights  string     `json:"highlights" form:"highlights"`
+	Metrics     string     `json:"metrics" form:"metrics"`
+	Challenge   string     `json:"challenge" form:"challenge"`
+	Solution    string     `json:"solution" form:"solution"`
+	GalleryJSON string     `json:"gallery_json" form:"gallery_json"`
 	Status      string     `json:"status" form:"status"`
 	IsFeatured  bool       `json:"is_featured" form:"is_featured"`
 	SortOrder   int        `json:"sort_order" form:"sort_order"`
+	Priority    int        `json:"priority" form:"priority"`
+	StartDate   *time.Time `json:"start_date" form:"start_date"`
+	EndDate     *time.Time `json:"end_date" form:"end_date"`
 	PublishedAt *time.Time `json:"published_at" form:"published_at"`
 }
 
@@ -312,9 +327,18 @@ func siteProjectInput(req SiteProjectRequest) services.SiteProjectInput {
 		DemoURL:     strings.TrimSpace(req.DemoURL),
 		RepoURL:     strings.TrimSpace(req.RepoURL),
 		StackTags:   strings.TrimSpace(req.StackTags),
+		Role:        strings.TrimSpace(req.Role),
+		Highlights:  strings.TrimSpace(req.Highlights),
+		Metrics:     strings.TrimSpace(req.Metrics),
+		Challenge:   strings.TrimSpace(req.Challenge),
+		Solution:    strings.TrimSpace(req.Solution),
+		GalleryJSON: strings.TrimSpace(req.GalleryJSON),
 		Status:      strings.TrimSpace(req.Status),
 		IsFeatured:  req.IsFeatured,
 		SortOrder:   req.SortOrder,
+		Priority:    req.Priority,
+		StartDate:   req.StartDate,
+		EndDate:     req.EndDate,
 		PublishedAt: req.PublishedAt,
 	}
 }
@@ -1021,12 +1045,36 @@ func (c *AdminController) ListRAGQueryLogs(g *gin.Context) {
 
 func (c *AdminController) ListRAGFeedback(g *gin.Context) {
 	limit := parseIntDefault(g.Query("limit"), 30)
-	items, err := c.adminData.ListRAGFeedback(g.Request.Context(), limit, g.Query("rating"))
+	items, err := c.adminData.ListRAGFeedback(g.Request.Context(), limit, g.Query("rating"), g.Query("status"))
 	if err != nil {
 		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list rag feedback"})
 		return
 	}
 	g.JSON(http.StatusOK, gin.H{"feedback": items})
+}
+
+func (c *AdminController) RAGConfig(g *gin.Context) {
+	cfg, err := c.adminData.RAGConfig(g.Request.Context())
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load rag config"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"config": cfg})
+}
+
+func (c *AdminController) SaveRAGConfig(g *gin.Context) {
+	var req models.RAGConfig
+	if err := bindRequest(g, &req); err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	cfg, err := c.adminData.SaveRAGConfig(g.Request.Context(), req)
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save rag config"})
+		return
+	}
+	c.logAction(g, "保存 RAG 调参配置", "AI 助手", fmt.Sprintf("topK=%d minScore=%.2f", cfg.TopK, cfg.MinScore))
+	g.JSON(http.StatusOK, gin.H{"config": cfg})
 }
 
 func (c *AdminController) SearchRAGDiagnostics(g *gin.Context) {
@@ -1051,6 +1099,98 @@ func (c *AdminController) RunRAGEval(g *gin.Context) {
 		return
 	}
 	g.JSON(http.StatusOK, gin.H{"run": run})
+}
+
+func (c *AdminController) ListRAGEvalCases(g *gin.Context) {
+	items, err := c.adminData.ListRAGEvalCases(g.Request.Context())
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list rag eval cases"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"cases": items})
+}
+
+func (c *AdminController) SaveRAGEvalCase(g *gin.Context) {
+	var req models.RAGEvalCase
+	if err := bindRequest(g, &req); err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if raw := strings.TrimSpace(g.Param("id")); raw != "" {
+		req.ID = raw
+	}
+	item, err := c.adminData.SaveRAGEvalCase(g.Request.Context(), req)
+	if err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.logAction(g, "保存 RAG 评测用例", "AI 助手", item.ID)
+	g.JSON(http.StatusOK, gin.H{"case": item})
+}
+
+func (c *AdminController) DeleteRAGEvalCase(g *gin.Context) {
+	id := strings.TrimSpace(g.Param("id"))
+	if id == "" {
+		g.JSON(http.StatusBadRequest, gin.H{"error": "missing eval case id"})
+		return
+	}
+	if err := c.adminData.DeleteRAGEvalCase(g.Request.Context(), id); err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete rag eval case"})
+		return
+	}
+	c.logAction(g, "删除 RAG 评测用例", "AI 助手", id)
+	g.Status(http.StatusNoContent)
+}
+
+func (c *AdminController) ListRAGEvalRuns(g *gin.Context) {
+	items, err := c.adminData.ListRAGEvalRuns(g.Request.Context(), parseIntDefault(g.Query("limit"), 20))
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list rag eval runs"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"runs": items})
+}
+
+func (c *AdminController) RAGAnalytics(g *gin.Context) {
+	analytics, err := c.adminData.RAGAnalytics(g.Request.Context(), parseIntDefault(g.Query("limit"), 500))
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load rag analytics"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"analytics": analytics})
+}
+
+func (c *AdminController) UpdateRAGFeedbackStatus(g *gin.Context) {
+	id, ok := parseIDParam(g, "id")
+	if !ok {
+		return
+	}
+	var req RAGFeedbackStatusRequest
+	if err := bindRequest(g, &req); err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	item, err := c.adminData.UpdateRAGFeedbackStatus(g.Request.Context(), id, req.Status, req.AdminNote)
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update rag feedback"})
+		return
+	}
+	c.logAction(g, "处理 RAG 反馈", "AI 助手", fmt.Sprintf("feedback=%d status=%s", id, item.Status))
+	g.JSON(http.StatusOK, gin.H{"feedback": item})
+}
+
+func (c *AdminController) ConvertRAGFeedbackToEvalCase(g *gin.Context) {
+	id, ok := parseIDParam(g, "id")
+	if !ok {
+		return
+	}
+	item, err := c.adminData.ConvertRAGFeedbackToEvalCase(g.Request.Context(), id)
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to convert rag feedback"})
+		return
+	}
+	c.logAction(g, "RAG 反馈转评测用例", "AI 助手", fmt.Sprintf("feedback=%d case=%s", id, item.ID))
+	g.JSON(http.StatusCreated, gin.H{"case": item})
 }
 
 func (c *AdminController) ListRAGChunks(g *gin.Context) {

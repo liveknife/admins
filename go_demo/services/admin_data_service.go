@@ -87,9 +87,18 @@ type SiteProjectInput struct {
 	DemoURL     string
 	RepoURL     string
 	StackTags   string
+	Role        string
+	Highlights  string
+	Metrics     string
+	Challenge   string
+	Solution    string
+	GalleryJSON string
 	Status      string
 	IsFeatured  bool
 	SortOrder   int
+	Priority    int
+	StartDate   *time.Time
+	EndDate     *time.Time
 	PublishedAt *time.Time
 }
 
@@ -1168,7 +1177,7 @@ func (s *AdminDataService) ListSiteProjects(ctx context.Context, page, pageSize 
 		listWhere += " AND status=$3"
 		args = append(args, status)
 	}
-	rows, err := database.QueryCtx(ctx, s.db, `SELECT id,name,summary,description,cover_url,demo_url,repo_url,stack_tags,status,is_featured,sort_order,published_at,created_at,updated_at FROM site_projects `+listWhere+` ORDER BY is_featured DESC,sort_order ASC,id DESC LIMIT $1 OFFSET $2`, args...)
+	rows, err := database.QueryCtx(ctx, s.db, siteProjectSelect()+` FROM site_projects `+listWhere+` ORDER BY is_featured DESC,priority DESC,sort_order ASC,id DESC LIMIT $1 OFFSET $2`, args...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -1191,8 +1200,8 @@ func (s *AdminDataService) SaveSiteProject(ctx context.Context, id int64, input 
 	}
 	if id == 0 {
 		var newID int64
-		query := database.RewriteSQL(`INSERT INTO site_projects(name,summary,description,cover_url,demo_url,repo_url,stack_tags,status,is_featured,sort_order,published_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`)
-		args := []any{strings.TrimSpace(input.Name), input.Summary, input.Description, input.CoverURL, input.DemoURL, input.RepoURL, input.StackTags, status, input.IsFeatured, input.SortOrder, input.PublishedAt}
+		query := database.RewriteSQL(`INSERT INTO site_projects(name,summary,description,cover_url,demo_url,repo_url,stack_tags,role,highlights,metrics,challenge,solution,gallery_json,status,is_featured,sort_order,priority,start_date,end_date,published_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING id`)
+		args := []any{strings.TrimSpace(input.Name), input.Summary, input.Description, input.CoverURL, input.DemoURL, input.RepoURL, input.StackTags, input.Role, input.Highlights, input.Metrics, input.Challenge, input.Solution, input.GalleryJSON, status, input.IsFeatured, input.SortOrder, input.Priority, input.StartDate, input.EndDate, input.PublishedAt}
 		if database.CurrentDialect.SupportsReturning() {
 			if err := s.db.QueryRowContext(ctx, query, args...).Scan(&newID); err != nil {
 				return nil, err
@@ -1210,7 +1219,7 @@ func (s *AdminDataService) SaveSiteProject(ctx context.Context, id int64, input 
 		}
 		return item, err
 	}
-	_, err := database.ExecCtx(ctx, s.db, `UPDATE site_projects SET name=$1,summary=$2,description=$3,cover_url=$4,demo_url=$5,repo_url=$6,stack_tags=$7,status=$8,is_featured=$9,sort_order=$10,published_at=$11,updated_at=`+database.Now()+` WHERE id=$12`, strings.TrimSpace(input.Name), input.Summary, input.Description, input.CoverURL, input.DemoURL, input.RepoURL, input.StackTags, status, input.IsFeatured, input.SortOrder, input.PublishedAt, id)
+	_, err := database.ExecCtx(ctx, s.db, `UPDATE site_projects SET name=$1,summary=$2,description=$3,cover_url=$4,demo_url=$5,repo_url=$6,stack_tags=$7,role=$8,highlights=$9,metrics=$10,challenge=$11,solution=$12,gallery_json=$13,status=$14,is_featured=$15,sort_order=$16,priority=$17,start_date=$18,end_date=$19,published_at=$20,updated_at=`+database.Now()+` WHERE id=$21`, strings.TrimSpace(input.Name), input.Summary, input.Description, input.CoverURL, input.DemoURL, input.RepoURL, input.StackTags, input.Role, input.Highlights, input.Metrics, input.Challenge, input.Solution, input.GalleryJSON, status, input.IsFeatured, input.SortOrder, input.Priority, input.StartDate, input.EndDate, input.PublishedAt, id)
 	if err != nil {
 		return nil, err
 	}
@@ -1230,7 +1239,7 @@ func (s *AdminDataService) DeleteSiteProject(ctx context.Context, id int64) erro
 }
 
 func (s *AdminDataService) GetSiteProject(ctx context.Context, id int64) (*models.SiteProject, error) {
-	rows, err := database.QueryCtx(ctx, s.db, `SELECT id,name,summary,description,cover_url,demo_url,repo_url,stack_tags,status,is_featured,sort_order,published_at,created_at,updated_at FROM site_projects WHERE id=$1`, id)
+	rows, err := database.QueryCtx(ctx, s.db, siteProjectSelect()+` FROM site_projects WHERE id=$1`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -1636,11 +1645,11 @@ func (s *AdminDataService) ListRAGQueryLogs(ctx context.Context, limit int) ([]m
 	return s.rag.ListQueryLogs(ctx, limit)
 }
 
-func (s *AdminDataService) ListRAGFeedback(ctx context.Context, limit int, rating string) ([]models.RAGFeedback, error) {
+func (s *AdminDataService) ListRAGFeedback(ctx context.Context, limit int, rating, status string) ([]models.RAGFeedback, error) {
 	if s.rag == nil {
 		return nil, fmt.Errorf("rag service is not initialized")
 	}
-	return s.rag.ListFeedback(ctx, limit, rating)
+	return s.rag.ListFeedback(ctx, limit, rating, status)
 }
 
 func (s *AdminDataService) ListRAGChunks(ctx context.Context, sourceType string, sourceID int64, limit int) ([]models.KnowledgeChunkPreview, error) {
@@ -1662,6 +1671,69 @@ func (s *AdminDataService) RunRAGEval(ctx context.Context, includeInternal bool)
 		return nil, fmt.Errorf("rag service is not initialized")
 	}
 	return s.rag.RunEval(ctx, includeInternal)
+}
+
+func (s *AdminDataService) RAGConfig(ctx context.Context) (*models.RAGConfig, error) {
+	if s.rag == nil {
+		return nil, fmt.Errorf("rag service is not initialized")
+	}
+	return s.rag.GetConfig(ctx)
+}
+
+func (s *AdminDataService) SaveRAGConfig(ctx context.Context, cfg models.RAGConfig) (*models.RAGConfig, error) {
+	if s.rag == nil {
+		return nil, fmt.Errorf("rag service is not initialized")
+	}
+	return s.rag.SaveConfig(ctx, cfg)
+}
+
+func (s *AdminDataService) ListRAGEvalCases(ctx context.Context) ([]models.RAGEvalCase, error) {
+	if s.rag == nil {
+		return nil, fmt.Errorf("rag service is not initialized")
+	}
+	return s.rag.ListEvalCases(ctx, false)
+}
+
+func (s *AdminDataService) SaveRAGEvalCase(ctx context.Context, item models.RAGEvalCase) (*models.RAGEvalCase, error) {
+	if s.rag == nil {
+		return nil, fmt.Errorf("rag service is not initialized")
+	}
+	return s.rag.SaveEvalCase(ctx, item)
+}
+
+func (s *AdminDataService) DeleteRAGEvalCase(ctx context.Context, id string) error {
+	if s.rag == nil {
+		return fmt.Errorf("rag service is not initialized")
+	}
+	return s.rag.DeleteEvalCase(ctx, id)
+}
+
+func (s *AdminDataService) ListRAGEvalRuns(ctx context.Context, limit int) ([]models.RAGEvalRunSummary, error) {
+	if s.rag == nil {
+		return nil, fmt.Errorf("rag service is not initialized")
+	}
+	return s.rag.ListEvalRuns(ctx, limit)
+}
+
+func (s *AdminDataService) RAGAnalytics(ctx context.Context, limit int) (*models.RAGAnalytics, error) {
+	if s.rag == nil {
+		return nil, fmt.Errorf("rag service is not initialized")
+	}
+	return s.rag.Analytics(ctx, limit)
+}
+
+func (s *AdminDataService) UpdateRAGFeedbackStatus(ctx context.Context, id int64, status, note string) (*models.RAGFeedback, error) {
+	if s.rag == nil {
+		return nil, fmt.Errorf("rag service is not initialized")
+	}
+	return s.rag.UpdateFeedbackStatus(ctx, id, status, note)
+}
+
+func (s *AdminDataService) ConvertRAGFeedbackToEvalCase(ctx context.Context, id int64) (*models.RAGEvalCase, error) {
+	if s.rag == nil {
+		return nil, fmt.Errorf("rag service is not initialized")
+	}
+	return s.rag.ConvertFeedbackToEvalCase(ctx, id)
 }
 
 func (s *AdminDataService) UploadDocument(ctx context.Context, file *multipart.FileHeader, visibility string) (*models.UploadedDocument, error) {
@@ -1815,10 +1887,20 @@ func siteTimelineSelect() string {
 	return `SELECT id,title,summary,content,phase,event_type,tags,link_url,status,is_featured,sort_order,happened_at,published_at,created_at,updated_at`
 }
 
+func siteProjectSelect() string {
+	return `SELECT id,name,summary,description,cover_url,demo_url,repo_url,stack_tags,role,highlights,metrics,challenge,solution,gallery_json,status,is_featured,sort_order,priority,start_date,end_date,published_at,created_at,updated_at`
+}
+
 func scanSiteProject(rows *sql.Rows) (models.SiteProject, error) {
 	var item models.SiteProject
-	var publishedAt sql.NullTime
-	err := rows.Scan(&item.ID, &item.Name, &item.Summary, &item.Description, &item.CoverURL, &item.DemoURL, &item.RepoURL, &item.StackTags, &item.Status, &item.IsFeatured, &item.SortOrder, &publishedAt, &item.CreatedAt, &item.UpdatedAt)
+	var startDate, endDate, publishedAt sql.NullTime
+	err := rows.Scan(&item.ID, &item.Name, &item.Summary, &item.Description, &item.CoverURL, &item.DemoURL, &item.RepoURL, &item.StackTags, &item.Role, &item.Highlights, &item.Metrics, &item.Challenge, &item.Solution, &item.GalleryJSON, &item.Status, &item.IsFeatured, &item.SortOrder, &item.Priority, &startDate, &endDate, &publishedAt, &item.CreatedAt, &item.UpdatedAt)
+	if startDate.Valid {
+		item.StartDate = &startDate.Time
+	}
+	if endDate.Valid {
+		item.EndDate = &endDate.Time
+	}
 	if publishedAt.Valid {
 		item.PublishedAt = &publishedAt.Time
 	}
