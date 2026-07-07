@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -61,6 +62,22 @@ type AskAssistantRequest struct {
 	Question string `json:"question" form:"question"`
 }
 
+type AIModelConfigRequest struct {
+	Name           string  `json:"name" form:"name" binding:"required"`
+	Provider       string  `json:"provider" form:"provider"`
+	APIFormat      string  `json:"api_format" form:"api_format"`
+	BaseURL        string  `json:"base_url" form:"base_url"`
+	APIKey         string  `json:"api_key" form:"api_key"`
+	ChatModel      string  `json:"chat_model" form:"chat_model"`
+	EmbeddingModel string  `json:"embedding_model" form:"embedding_model"`
+	Temperature    float64 `json:"temperature" form:"temperature"`
+	MaxTokens      int     `json:"max_tokens" form:"max_tokens"`
+	TimeoutSeconds int     `json:"timeout_seconds" form:"timeout_seconds"`
+	ExtraJSON      string  `json:"extra_json" form:"extra_json"`
+	IsDefault      bool    `json:"is_default" form:"is_default"`
+	Enabled        bool    `json:"enabled" form:"enabled"`
+}
+
 type CreateNotificationRequest struct {
 	Title   string `json:"title"   form:"title"   binding:"required,min=1,max=160"`
 	Content string `json:"content" form:"content"`
@@ -76,6 +93,27 @@ type AnnouncementRequest struct {
 
 type SiteKnowledgeRequest struct {
 	Question string `json:"question" form:"question"`
+	Context  []struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	} `json:"context"`
+}
+
+type SiteFeedbackRequest struct {
+	QueryLogID int64  `json:"query_log_id" form:"query_log_id"`
+	Question   string `json:"question" form:"question"`
+	Rating     string `json:"rating" form:"rating"`
+	Comment    string `json:"comment" form:"comment"`
+}
+
+type SiteCodeExplainRequest struct {
+	Code     string `json:"code" form:"code" binding:"required"`
+	Language string `json:"language" form:"language"`
+	Question string `json:"question" form:"question"`
+}
+
+type SiteSearchSummarizeRequest struct {
+	Query string `json:"query" form:"query" binding:"required"`
 }
 
 type SiteVisitRequest struct {
@@ -222,6 +260,24 @@ func siteResourceInput(req SiteResourceRequest) services.SiteResourceInput {
 		IsFeatured:      req.IsFeatured,
 		SortOrder:       req.SortOrder,
 		PublishedAt:     req.PublishedAt,
+	}
+}
+
+func aiModelConfigInput(req AIModelConfigRequest) services.AIModelConfigInput {
+	return services.AIModelConfigInput{
+		Name:           strings.TrimSpace(req.Name),
+		Provider:       strings.TrimSpace(req.Provider),
+		APIFormat:      strings.TrimSpace(req.APIFormat),
+		BaseURL:        strings.TrimSpace(req.BaseURL),
+		APIKey:         strings.TrimSpace(req.APIKey),
+		ChatModel:      strings.TrimSpace(req.ChatModel),
+		EmbeddingModel: strings.TrimSpace(req.EmbeddingModel),
+		Temperature:    req.Temperature,
+		MaxTokens:      req.MaxTokens,
+		TimeoutSeconds: req.TimeoutSeconds,
+		ExtraJSON:      strings.TrimSpace(req.ExtraJSON),
+		IsDefault:      req.IsDefault,
+		Enabled:        req.Enabled,
 	}
 }
 
@@ -827,6 +883,198 @@ func (c *AdminController) AskAssistant(g *gin.Context) {
 	g.JSON(http.StatusOK, gin.H{"result": result})
 }
 
+func (c *AdminController) ListAIModelConfigs(g *gin.Context) {
+	items, err := c.adminData.ListAIModelConfigs(g.Request.Context())
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list ai model configs"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"configs": items})
+}
+
+func (c *AdminController) SaveAIModelConfig(g *gin.Context) {
+	id := int64(0)
+	if raw := g.Param("id"); raw != "" {
+		parsed, ok := parseIDParam(g, "id")
+		if !ok {
+			return
+		}
+		id = parsed
+	}
+	var req AIModelConfigRequest
+	if err := bindRequest(g, &req); err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	item, err := c.adminData.SaveAIModelConfig(g.Request.Context(), id, aiModelConfigInput(req))
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save ai model config"})
+		return
+	}
+	c.logAction(g, "保存大模型配置", "大模型配置", item.Name)
+	g.JSON(http.StatusOK, gin.H{"config": item})
+}
+
+func (c *AdminController) SetDefaultAIModelConfig(g *gin.Context) {
+	id, ok := parseIDParam(g, "id")
+	if !ok {
+		return
+	}
+	item, err := c.adminData.SetDefaultAIModelConfig(g.Request.Context(), id)
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to activate ai model config"})
+		return
+	}
+	c.logAction(g, "启用大模型配置", "大模型配置", item.Name)
+	g.JSON(http.StatusOK, gin.H{"config": item})
+}
+
+func (c *AdminController) TestAIModelConfig(g *gin.Context) {
+	id, ok := parseIDParam(g, "id")
+	if !ok {
+		return
+	}
+	item, err := c.adminData.TestAIModelConfig(g.Request.Context(), id)
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to test ai model config"})
+		return
+	}
+	c.logAction(g, "测试大模型配置", "大模型配置", fmt.Sprintf("%s：%s", item.Name, item.LastTestStatus))
+	g.JSON(http.StatusOK, gin.H{"config": item})
+}
+
+func (c *AdminController) DeleteAIModelConfig(g *gin.Context) {
+	id, ok := parseIDParam(g, "id")
+	if !ok {
+		return
+	}
+	if err := c.adminData.DeleteAIModelConfig(g.Request.Context(), id); err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete ai model config"})
+		return
+	}
+	c.logAction(g, "删除大模型配置", "大模型配置", fmt.Sprintf("配置ID：%d", id))
+	g.Status(http.StatusNoContent)
+}
+
+func (c *AdminController) RAGIndexStats(g *gin.Context) {
+	stats, err := c.adminData.RAGIndexStats(g.Request.Context())
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load rag index stats"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"stats": stats})
+}
+
+func (c *AdminController) RebuildRAGIndex(g *gin.Context) {
+	job, err := c.adminData.EnqueueRAGRebuild(g.Request.Context())
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to enqueue rag rebuild"})
+		return
+	}
+	c.logAction(g, "提交 RAG 知识索引重建", "AI 助手", fmt.Sprintf("job=%d", job.ID))
+	g.JSON(http.StatusAccepted, gin.H{"job": job})
+}
+
+func (c *AdminController) ListRAGIndexJobs(g *gin.Context) {
+	limit := parseIntDefault(g.Query("limit"), 20)
+	jobs, err := c.adminData.ListRAGIndexJobs(g.Request.Context(), limit)
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list rag jobs"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"jobs": jobs})
+}
+
+func (c *AdminController) RetryRAGIndexJob(g *gin.Context) {
+	id, ok := parseIDParam(g, "id")
+	if !ok {
+		return
+	}
+	job, err := c.adminData.RetryRAGIndexJob(g.Request.Context(), id)
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to retry rag job"})
+		return
+	}
+	c.logAction(g, "重试 RAG 知识索引任务", "AI 助手", fmt.Sprintf("job=%d", job.ID))
+	g.JSON(http.StatusAccepted, gin.H{"job": job})
+}
+
+func (c *AdminController) ListRAGQueryLogs(g *gin.Context) {
+	limit := parseIntDefault(g.Query("limit"), 30)
+	logs, err := c.adminData.ListRAGQueryLogs(g.Request.Context(), limit)
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list rag query logs"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"logs": logs})
+}
+
+func (c *AdminController) UploadDocument(g *gin.Context) {
+	fh, err := g.FormFile("file")
+	if err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"error": "missing file"})
+		return
+	}
+	item, err := c.adminData.UploadDocument(g.Request.Context(), fh)
+	if err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.logAction(g, "上传 RAG 文档", "RAG 文档管理", item.OriginalName)
+	g.JSON(http.StatusCreated, gin.H{"document": item})
+}
+
+func (c *AdminController) ListDocuments(g *gin.Context) {
+	page, pageSize := parsePaginationQuery(g)
+	items, total, err := c.adminData.ListDocuments(g.Request.Context(), page, pageSize)
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list documents"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"documents": items, "total": total, "page": page, "page_size": pageSize})
+}
+
+func (c *AdminController) PreviewDocument(g *gin.Context) {
+	id, ok := parseIDParam(g, "id")
+	if !ok {
+		return
+	}
+	item, err := c.adminData.PreviewDocument(g.Request.Context(), id)
+	if err != nil {
+		g.JSON(http.StatusNotFound, gin.H{"error": "document not found"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"document": item})
+}
+
+func (c *AdminController) DeleteDocument(g *gin.Context) {
+	id, ok := parseIDParam(g, "id")
+	if !ok {
+		return
+	}
+	chunks, err := c.adminData.DeleteDocument(g.Request.Context(), id)
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete document"})
+		return
+	}
+	c.logAction(g, "删除 RAG 文档", "RAG 文档管理", fmt.Sprintf("document=%d chunks=%d", id, chunks))
+	g.Status(http.StatusNoContent)
+}
+
+func (c *AdminController) RebuildDocument(g *gin.Context) {
+	id, ok := parseIDParam(g, "id")
+	if !ok {
+		return
+	}
+	item, err := c.adminData.RebuildDocument(g.Request.Context(), id)
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to rebuild document"})
+		return
+	}
+	c.logAction(g, "重建 RAG 文档索引", "RAG 文档管理", item.OriginalName)
+	g.JSON(http.StatusOK, gin.H{"document": item})
+}
+
 func (c *AdminController) SystemHealth(g *gin.Context) {
 	g.JSON(http.StatusOK, gin.H{"health": c.monitor.Health()})
 }
@@ -911,12 +1159,129 @@ func (c *AdminController) PublicSiteKnowledge(g *gin.Context) {
 		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	answer, err := c.adminData.AskSiteKnowledge(g.Request.Context(), req.Question)
+	question := knowledgeQuestionWithContext(req)
+	answer, err := c.adminData.AskSiteKnowledge(g.Request.Context(), question)
 	if err != nil {
 		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to search knowledge base"})
 		return
 	}
 	g.JSON(http.StatusOK, gin.H{"answer": answer})
+}
+
+func (c *AdminController) PublicSiteKnowledgeStream(g *gin.Context) {
+	var req SiteKnowledgeRequest
+	if err := bindRequest(g, &req); err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	answer, err := c.adminData.AskSiteKnowledge(g.Request.Context(), knowledgeQuestionWithContext(req))
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to search knowledge base"})
+		return
+	}
+	g.Header("Content-Type", "text/event-stream; charset=utf-8")
+	g.Header("Cache-Control", "no-cache")
+	g.Header("Connection", "keep-alive")
+	g.Status(http.StatusOK)
+	flushSSE(g, "meta", gin.H{"query_log_id": answer.QueryLogID})
+	for _, token := range streamTextChunks(answer.Answer, 18) {
+		flushSSE(g, "token", gin.H{"content": token})
+	}
+	flushSSE(g, "sources", answer.Sources)
+	flushSSE(g, "suggestions", answer.Suggestions)
+	flushSSE(g, "done", gin.H{"answer": answer})
+}
+
+func (c *AdminController) PublicSiteFeedback(g *gin.Context) {
+	var req SiteFeedbackRequest
+	if err := bindRequest(g, &req); err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	item, err := c.adminData.SaveRAGFeedback(g.Request.Context(), req.QueryLogID, req.Question, req.Rating, req.Comment, g.ClientIP(), g.Request.UserAgent())
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save feedback"})
+		return
+	}
+	g.JSON(http.StatusCreated, gin.H{"feedback": item})
+}
+
+func (c *AdminController) PublicSiteCodeExplain(g *gin.Context) {
+	var req SiteCodeExplainRequest
+	if err := bindRequest(g, &req); err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	answer, err := c.adminData.ExplainCode(g.Request.Context(), req.Code, req.Language, req.Question)
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to explain code"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"answer": answer})
+}
+
+func (c *AdminController) PublicSiteSearchSummarize(g *gin.Context) {
+	var req SiteSearchSummarizeRequest
+	if err := bindRequest(g, &req); err != nil {
+		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	answer, err := c.adminData.SummarizeSearch(g.Request.Context(), req.Query)
+	if err != nil {
+		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to summarize search"})
+		return
+	}
+	g.JSON(http.StatusOK, gin.H{"answer": answer})
+}
+
+func knowledgeQuestionWithContext(req SiteKnowledgeRequest) string {
+	question := strings.TrimSpace(req.Question)
+	if len(req.Context) == 0 {
+		return question
+	}
+	var parts []string
+	for _, item := range req.Context {
+		role := strings.TrimSpace(item.Role)
+		content := strings.TrimSpace(item.Content)
+		if content == "" {
+			continue
+		}
+		if role == "" {
+			role = "message"
+		}
+		parts = append(parts, role+": "+content)
+	}
+	if len(parts) == 0 {
+		return question
+	}
+	return question + "\n\n最近对话上下文：\n" + strings.Join(parts, "\n")
+}
+
+func flushSSE(g *gin.Context, event string, payload any) {
+	raw, _ := json.Marshal(payload)
+	_, _ = fmt.Fprintf(g.Writer, "event: %s\ndata: %s\n\n", event, raw)
+	if flusher, ok := g.Writer.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func streamTextChunks(value string, size int) []string {
+	runes := []rune(value)
+	if size <= 0 {
+		size = 16
+	}
+	if len(runes) == 0 {
+		return []string{""}
+	}
+	out := make([]string, 0, len(runes)/size+1)
+	for start := 0; start < len(runes); start += size {
+		end := start + size
+		if end > len(runes) {
+			end = len(runes)
+		}
+		out = append(out, string(runes[start:end]))
+	}
+	return out
 }
 
 func (c *AdminController) PublicSiteMessage(g *gin.Context) {
@@ -1349,6 +1714,13 @@ func parsePaginationQuery(g *gin.Context) (int, int) {
 		pageSize = 100
 	}
 	return page, pageSize
+}
+
+func parseIntDefault(value string, fallback int) int {
+	if parsed, err := strconv.Atoi(value); err == nil && parsed > 0 {
+		return parsed
+	}
+	return fallback
 }
 
 func normalizeDevice(value, ua string) string {

@@ -106,6 +106,10 @@ func PrintDevConfig() {
 		{"REDIS_HOST", "Redis Host"},
 		{"DB_MAX_OPEN_CONN", "MaxConn"},
 		{"DEFAULT_ADMIN_EMAIL", "Admin Email"},
+		{"AI_PROVIDER", "AI Provider"},
+		{"AI_BASE_URL", "AI Base URL"},
+		{"AI_CHAT_MODEL", "AI Chat Model"},
+		{"AI_EMBEDDING_MODEL", "AI Embedding Model"},
 	}
 	maxLen := 0
 	for _, k := range keys {

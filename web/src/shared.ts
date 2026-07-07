@@ -109,9 +109,14 @@ export type KnowledgeAnswer = {
     title: string;
     summary: string;
     score: number;
+    url?: string;
+    snippet?: string;
+    highlighted_text?: string;
   }>;
   matches: SiteResource[];
   projects: SiteProject[];
+  suggestions?: string[];
+  query_log_id?: number;
 };
 
 export type SearchResponse = {

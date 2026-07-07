@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 
@@ -17,19 +18,32 @@ func main() {
 	config.ValidateProductionConfig()
 
 	db, err := database.Connect()
-	if err != nil { log.Fatalf("failed to connect database: %v", err) }
+	if err != nil {
+		log.Fatalf("failed to connect database: %v", err)
+	}
 	defer db.Close()
 
 	if redisClient, err := database.ConnectRedis(); err != nil {
 		fmt.Printf("[REDIS] warning: redis not available (%v)\n", err)
-	} else { defer redisClient.Close() }
+	} else {
+		defer redisClient.Close()
+	}
 
 	r := routes.Setup(db.DB)
 
-	services.InitMailer() // 初始化邮件服务（未配置 SMTP 时自动降级为 dry-run 模式）
+	services.InitMailer()
+	workerCtx, cancelWorkers := context.WithCancel(context.Background())
+	defer cancelWorkers()
+	services.NewRAGService(db.DB).StartWorker(workerCtx)
 
 	log.Printf("[%s] server running at http://localhost:%s", config.GetAppEnv(), port)
-	if config.IsProduction() { log.Print("[INFO] database=", database.CurrentDialect.Type, " | redis=", database.RedisClient != nil, " | gin=release") } else { config.PrintDevConfig() }
+	if config.IsProduction() {
+		log.Print("[INFO] database=", database.CurrentDialect.Type, " | redis=", database.RedisClient != nil, " | gin=release")
+	} else {
+		config.PrintDevConfig()
+	}
 
-	if err := r.Run(":" + port); err != nil { log.Fatalf("failed to start server: %v", err) }
+	if err := r.Run(":" + port); err != nil {
+		log.Fatalf("failed to start server: %v", err)
+	}
 }

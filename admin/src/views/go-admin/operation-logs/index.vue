@@ -40,7 +40,8 @@ const actionOptions = [
 ];
 
 // ── 操作类型 Tag 颜色映射 ──
-const getActionTagType = (action: string): string => {
+type TagType = "primary" | "success" | "warning" | "danger" | "info";
+const getActionTagType = (action: string): TagType => {
   const lowerAction = action.toLowerCase();
   if (lowerAction.includes("login") || lowerAction.includes("登")) return "success";
   if (lowerAction.includes("create") || lowerAction.includes("新建") || lowerAction.includes("创建")) return "primary";

@@ -3,6 +3,7 @@ import {
   apiBase,
   articleRouteHash,
   splitTags,
+  type KnowledgeAnswer,
   type SearchResponse,
   type SiteResource
 } from "./shared";
@@ -20,6 +21,8 @@ const PAGE_SIZE = 10;
 export function SearchPage({ query, category, tag, page }: Props) {
   const [input, setInput] = useState(query);
   const [data, setData] = useState<SearchResponse | null>(null);
+  const [summary, setSummary] = useState<KnowledgeAnswer | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
   const [status, setStatus] = useState<"idle" | "loading" | "ok" | "error">(
     query ? "loading" : "idle"
   );
@@ -66,6 +69,22 @@ export function SearchPage({ query, category, tag, page }: Props) {
   const submit = () => {
     const q = input.trim();
     navigate(searchHash(q, { category, tag }));
+  };
+
+  const summarize = async () => {
+    if (!query.trim()) return;
+    setSummaryLoading(true);
+    try {
+      const res = await fetch(`${apiBase}/api/v1/site/search/summarize`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query })
+      });
+      const json = await res.json();
+      setSummary(json.answer ?? null);
+    } finally {
+      setSummaryLoading(false);
+    }
   };
 
   return (
@@ -129,6 +148,38 @@ export function SearchPage({ query, category, tag, page }: Props) {
         <>
           <div className="searchSummary">
             共 <strong>{data.total}</strong> 条结果匹配 “{data.query}”
+          </div>
+          <div className="searchAIBox">
+            <div>
+              <strong>AI 总结</strong>
+              <span>基于 RAG 知识库汇总当前搜索主题</span>
+            </div>
+            <button type="button" onClick={summarize} disabled={summaryLoading || !query}>
+              {summaryLoading ? "生成中..." : "生成总结"}
+            </button>
+            {summary && (
+              <div className="searchAIResult">
+                <p>{summary.answer}</p>
+                {!!summary.sources?.length && (
+                  <div className="searchAISources">
+                    {summary.sources.slice(0, 3).map(source => (
+                      <a key={`${source.source_type}-${source.source_id}-${source.title}`} href={source.url || "#"}>
+                        {source.title} · {Math.round(source.score * 100)}%
+                      </a>
+                    ))}
+                  </div>
+                )}
+                {!!summary.suggestions?.length && (
+                  <div className="searchAISuggestions">
+                    {summary.suggestions.map(item => (
+                      <button key={item} type="button" onClick={() => navigate(`#/ask?q=${encodeURIComponent(item)}`)}>
+                        {item}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           <div className="searchList">
             {data.items.map(item => (

@@ -60,11 +60,11 @@ type DashboardSummary struct {
 	RecentNotifications []Notification    `json:"recent_notifications"`
 	MetricTrend         []DashboardMetric `json:"metric_trend"`
 	// 系统资源监控
-	SystemResources     *SystemResource   `json:"system_resources,omitempty"`
+	SystemResources *SystemResource `json:"system_resources,omitempty"`
 	// 访问来源分布（近7天）
-	SourceStats         []SourceStat      `json:"source_stats,omitempty"`
+	SourceStats []SourceStat `json:"source_stats,omitempty"`
 	// 消息类型统计
-	MessageTypeStats    []MessageTypeStat  `json:"message_type_stats,omitempty"`
+	MessageTypeStats []MessageTypeStat `json:"message_type_stats,omitempty"`
 }
 
 // SystemResource 系统资源使用率
@@ -79,13 +79,13 @@ type SystemResource struct {
 
 // SourceStat 访问来源统计
 type SourceStat struct {
-	Name  string  `json:"name"`
-	Value int64   `json:"value"`
+	Name  string `json:"name"`
+	Value int64  `json:"value"`
 }
 
 // MessageTypeStat 消息类型统计
 type MessageTypeStat struct {
-	Name  string `json:"name"`  // 系统消息/聊天消息/通知公告/其他消息
+	Name  string `json:"name"` // 系统消息/聊天消息/通知公告/其他消息
 	Value int64  `json:"value"`
 }
 
@@ -136,11 +136,36 @@ type RolePermissionPreview struct {
 }
 
 type AIAssistantResult struct {
-	Question string           `json:"question"`
-	Answer   string           `json:"answer"`
-	Insights []string         `json:"insights"`
-	Rows     []map[string]any `json:"rows"`
-	Metrics  map[string]int64 `json:"metrics"`
+	Question string            `json:"question"`
+	Answer   string            `json:"answer"`
+	Insights []string          `json:"insights"`
+	Rows     []map[string]any  `json:"rows"`
+	Metrics  map[string]int64  `json:"metrics"`
+	Sources  []KnowledgeSource `json:"sources,omitempty"`
+}
+
+type AIModelConfig struct {
+	ID              int64      `json:"id"`
+	Name            string     `json:"name"`
+	Provider        string     `json:"provider"`
+	APIFormat       string     `json:"api_format"`
+	BaseURL         string     `json:"base_url"`
+	ChatModel       string     `json:"chat_model"`
+	EmbeddingModel  string     `json:"embedding_model"`
+	APIKey          string     `json:"api_key,omitempty"`
+	HasAPIKey       bool       `json:"has_api_key"`
+	MaskedAPIKey    string     `json:"masked_api_key,omitempty"`
+	Temperature     float64    `json:"temperature"`
+	MaxTokens       int        `json:"max_tokens"`
+	TimeoutSeconds  int        `json:"timeout_seconds"`
+	ExtraJSON       string     `json:"extra_json"`
+	IsDefault       bool       `json:"is_default"`
+	Enabled         bool       `json:"enabled"`
+	LastTestStatus  string     `json:"last_test_status"`
+	LastTestMessage string     `json:"last_test_message"`
+	LastTestAt      *time.Time `json:"last_test_at,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 type SystemHealth struct {
@@ -317,10 +342,91 @@ type SitePublicStats struct {
 }
 
 type SiteKnowledgeAnswer struct {
-	Question string         `json:"question"`
-	Answer   string         `json:"answer"`
-	Matches  []SiteResource `json:"matches"`
-	Projects []SiteProject  `json:"projects"`
+	Question    string            `json:"question"`
+	Answer      string            `json:"answer"`
+	Sources     []KnowledgeSource `json:"sources"`
+	Matches     []SiteResource    `json:"matches"`
+	Projects    []SiteProject     `json:"projects"`
+	Suggestions []string          `json:"suggestions,omitempty"`
+	QueryLogID  int64             `json:"query_log_id,omitempty"`
+}
+
+type KnowledgeSource struct {
+	SourceType      string  `json:"source_type"`
+	SourceID        int64   `json:"source_id"`
+	Title           string  `json:"title"`
+	Summary         string  `json:"summary"`
+	Score           float64 `json:"score"`
+	URL             string  `json:"url,omitempty"`
+	Snippet         string  `json:"snippet,omitempty"`
+	HighlightedText string  `json:"highlighted_text,omitempty"`
+}
+
+type RAGIndexStats struct {
+	TotalChunks        int64            `json:"total_chunks"`
+	BySource           map[string]int64 `json:"by_source"`
+	TopK               int              `json:"top_k"`
+	ChatEnabled        bool             `json:"chat_enabled"`
+	VectorBackend      string           `json:"vector_backend"`
+	PGVectorAvailable  bool             `json:"pgvector_available"`
+	UpdatedAt          *time.Time       `json:"updated_at,omitempty"`
+	LatestJob          *RAGIndexJob     `json:"latest_job,omitempty"`
+	QueryCount         int64            `json:"query_count"`
+	HitCount           int64            `json:"hit_count"`
+	AverageLatencyMs   float64          `json:"average_latency_ms"`
+	AverageSourceCount float64          `json:"average_source_count"`
+}
+
+type RAGIndexJob struct {
+	ID           int64      `json:"id"`
+	JobType      string     `json:"job_type"`
+	Status       string     `json:"status"`
+	RetryCount   int        `json:"retry_count"`
+	MaxRetries   int        `json:"max_retries"`
+	ErrorMessage string     `json:"error_message"`
+	StartedAt    *time.Time `json:"started_at,omitempty"`
+	FinishedAt   *time.Time `json:"finished_at,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+}
+
+type RAGQueryLog struct {
+	ID            int64     `json:"id"`
+	Question      string    `json:"question"`
+	Answer        string    `json:"answer"`
+	Matched       bool      `json:"matched"`
+	SourceCount   int       `json:"source_count"`
+	TopScore      float64   `json:"top_score"`
+	LatencyMs     int64     `json:"latency_ms"`
+	UsedChatModel bool      `json:"used_chat_model"`
+	SourceJSON    string    `json:"source_json"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+type RAGFeedback struct {
+	ID         int64     `json:"id"`
+	QueryLogID int64     `json:"query_log_id"`
+	Question   string    `json:"question"`
+	Rating     string    `json:"rating"`
+	Comment    string    `json:"comment"`
+	IPAddress  string    `json:"ip_address,omitempty"`
+	UserAgent  string    `json:"user_agent,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+type UploadedDocument struct {
+	ID           int64     `json:"id"`
+	OriginalName string    `json:"original_name"`
+	FileName     string    `json:"file_name"`
+	FilePath     string    `json:"file_path"`
+	MimeType     string    `json:"mime_type"`
+	FileSize     int64     `json:"file_size"`
+	TextContent  string    `json:"text_content,omitempty"`
+	ChunkCount   int       `json:"chunk_count"`
+	Status       string    `json:"status"`
+	ErrorMessage string    `json:"error_message"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type SiteVisitBucket struct {

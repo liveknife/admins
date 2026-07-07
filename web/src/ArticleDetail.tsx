@@ -24,6 +24,13 @@ export function ArticleDetail({ slug }: Props) {
   const [status, setStatus] = useState<"loading" | "ok" | "notfound" | "error">("loading");
   const [related, setRelated] = useState<SiteResource[]>([]);
   const [activeHeadingId, setActiveHeadingId] = useState<string>("");
+  const [codeExplain, setCodeExplain] = useState<{ open: boolean; loading: boolean; answer: string; code: string; language: string }>({
+    open: false,
+    loading: false,
+    answer: "",
+    code: "",
+    language: ""
+  });
   const bodyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -130,6 +137,39 @@ export function ArticleDetail({ slug }: Props) {
     const cleanup = observeHeadings();
     return cleanup;
   }, [observeHeadings, rendered.html]);
+
+  useEffect(() => {
+    const root = bodyRef.current;
+    if (!root) return;
+    root.querySelectorAll(".codeExplainButton").forEach(node => node.remove());
+    root.querySelectorAll("pre").forEach(pre => {
+      const codeEl = pre.querySelector("code");
+      const code = codeEl?.textContent || pre.textContent || "";
+      if (!code.trim()) return;
+      pre.classList.add("codeBlockWithAI");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "codeExplainButton";
+      button.textContent = "AI 解释";
+      button.addEventListener("click", () => explainCode(code, codeLanguage(codeEl)));
+      pre.appendChild(button);
+    });
+  }, [rendered.html]);
+
+  const explainCode = async (code: string, language: string) => {
+    setCodeExplain({ open: true, loading: true, answer: "", code, language });
+    try {
+      const res = await fetch(`${apiBase}/api/v1/site/code-explain`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code, language })
+      });
+      const data = await res.json();
+      setCodeExplain({ open: true, loading: false, answer: data.answer || "", code, language });
+    } catch {
+      setCodeExplain({ open: true, loading: false, answer: "解释失败，请稍后重试。", code, language });
+    }
+  };
 
   // 同步 <title> 与 <meta>，便于收藏和分享
   useEffect(() => {
@@ -271,9 +311,25 @@ export function ArticleDetail({ slug }: Props) {
           )}
         </aside>
       </div>
+      {codeExplain.open && (
+        <div className="codeExplainDrawer">
+          <div>
+            <strong>AI 代码解释</strong>
+            <button type="button" onClick={() => setCodeExplain(prev => ({ ...prev, open: false }))}>关闭</button>
+          </div>
+          <small>{codeExplain.language || "code"} · {codeExplain.code.split("\n").length} lines</small>
+          {codeExplain.loading ? <p>正在分析...</p> : <p>{codeExplain.answer}</p>}
+        </div>
+      )}
     </section>
   );
 }
+
+const codeLanguage = (codeEl: Element | null) => {
+  const className = codeEl?.className || "";
+  const match = String(className).match(/language-([a-z0-9_-]+)/i);
+  return match?.[1] || "text";
+};
 
 const ensureMeta = (name: string) => {
   let el = document.querySelector<HTMLMetaElement>(`meta[name="${name}"]`);

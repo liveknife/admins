@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"mime/multipart"
 	"runtime"
 	"sort"
 	"strings"
@@ -16,7 +17,8 @@ import (
 )
 
 type AdminDataService struct {
-	db *sql.DB
+	db  *sql.DB
+	rag *RAGService
 }
 
 type OperationLogInput struct {
@@ -126,7 +128,7 @@ type SiteVisitInput struct {
 }
 
 func NewAdminDataService(db *sql.DB) *AdminDataService {
-	return &AdminDataService{db: db}
+	return &AdminDataService{db: db, rag: NewRAGService(db)}
 }
 
 func (s *AdminDataService) Dashboard(ctx context.Context, userID int64) (*models.DashboardSummary, error) {
@@ -369,6 +371,13 @@ func (s *AdminDataService) AskAssistant(ctx context.Context, question string) (*
 	}
 	if strings.Contains(question, "异常") || strings.Contains(lower, "error") || strings.Contains(lower, "exception") {
 		return s.exceptionAnalysis(ctx, question)
+	}
+	if s.rag != nil {
+		if result, ok, err := s.rag.AskAdminKnowledge(ctx, question); err != nil {
+			return s.logSummary(ctx, question)
+		} else if ok {
+			return result, nil
+		}
 	}
 	return s.logSummary(ctx, question)
 }
@@ -933,16 +942,27 @@ func (s *AdminDataService) SaveSiteResource(ctx context.Context, id int64, input
 			}
 			newID, _ = result.LastInsertId()
 		}
-		return s.GetSiteResource(ctx, newID)
+		item, err := s.GetSiteResource(ctx, newID)
+		if err == nil && s.rag != nil {
+			_ = s.rag.SyncSiteResource(ctx, item)
+		}
+		return item, err
 	}
 	_, err := database.ExecCtx(ctx, s.db, `UPDATE site_resources SET title=$1,slug=$2,summary=$3,content=$4,markdown_content=$5,category=$6,cover_url=$7,link_url=$8,tags=$9,seo_title=$10,seo_description=$11,seo_keywords=$12,status=$13,is_featured=$14,sort_order=$15,published_at=$16,updated_at=`+database.Now()+` WHERE id=$17`, strings.TrimSpace(input.Title), slug, input.Summary, input.Content, input.MarkdownContent, input.Category, input.CoverURL, input.LinkURL, input.Tags, input.SEOTitle, input.SEODescription, input.SEOKeywords, status, input.IsFeatured, input.SortOrder, publishedAt, id)
 	if err != nil {
 		return nil, err
 	}
-	return s.GetSiteResource(ctx, id)
+	item, err := s.GetSiteResource(ctx, id)
+	if err == nil && s.rag != nil {
+		_ = s.rag.SyncSiteResource(ctx, item)
+	}
+	return item, err
 }
 
 func (s *AdminDataService) DeleteSiteResource(ctx context.Context, id int64) error {
+	if s.rag != nil {
+		_ = s.rag.DeleteSource(ctx, knowledgeSourceResource, id)
+	}
 	_, err := database.ExecCtx(ctx, s.db, `DELETE FROM site_resources WHERE id=$1`, id)
 	return err
 }
@@ -1099,16 +1119,27 @@ func (s *AdminDataService) SaveSiteTechStack(ctx context.Context, id int64, inpu
 			}
 			newID, _ = result.LastInsertId()
 		}
-		return s.GetSiteTechStack(ctx, newID)
+		item, err := s.GetSiteTechStack(ctx, newID)
+		if err == nil && s.rag != nil {
+			_ = s.rag.SyncSiteTechStack(ctx, item)
+		}
+		return item, err
 	}
 	_, err := database.ExecCtx(ctx, s.db, `UPDATE site_tech_stacks SET name=$1,category=$2,level=$3,icon_url=$4,description=$5,is_active=$6,sort_order=$7,updated_at=`+database.Now()+` WHERE id=$8`, strings.TrimSpace(input.Name), input.Category, level, input.IconURL, input.Description, input.IsActive, input.SortOrder, id)
 	if err != nil {
 		return nil, err
 	}
-	return s.GetSiteTechStack(ctx, id)
+	item, err := s.GetSiteTechStack(ctx, id)
+	if err == nil && s.rag != nil {
+		_ = s.rag.SyncSiteTechStack(ctx, item)
+	}
+	return item, err
 }
 
 func (s *AdminDataService) DeleteSiteTechStack(ctx context.Context, id int64) error {
+	if s.rag != nil {
+		_ = s.rag.DeleteSource(ctx, knowledgeSourceTech, id)
+	}
 	_, err := database.ExecCtx(ctx, s.db, `DELETE FROM site_tech_stacks WHERE id=$1`, id)
 	return err
 }
@@ -1173,16 +1204,27 @@ func (s *AdminDataService) SaveSiteProject(ctx context.Context, id int64, input 
 			}
 			newID, _ = result.LastInsertId()
 		}
-		return s.GetSiteProject(ctx, newID)
+		item, err := s.GetSiteProject(ctx, newID)
+		if err == nil && s.rag != nil {
+			_ = s.rag.SyncSiteProject(ctx, item)
+		}
+		return item, err
 	}
 	_, err := database.ExecCtx(ctx, s.db, `UPDATE site_projects SET name=$1,summary=$2,description=$3,cover_url=$4,demo_url=$5,repo_url=$6,stack_tags=$7,status=$8,is_featured=$9,sort_order=$10,published_at=$11,updated_at=`+database.Now()+` WHERE id=$12`, strings.TrimSpace(input.Name), input.Summary, input.Description, input.CoverURL, input.DemoURL, input.RepoURL, input.StackTags, status, input.IsFeatured, input.SortOrder, input.PublishedAt, id)
 	if err != nil {
 		return nil, err
 	}
-	return s.GetSiteProject(ctx, id)
+	item, err := s.GetSiteProject(ctx, id)
+	if err == nil && s.rag != nil {
+		_ = s.rag.SyncSiteProject(ctx, item)
+	}
+	return item, err
 }
 
 func (s *AdminDataService) DeleteSiteProject(ctx context.Context, id int64) error {
+	if s.rag != nil {
+		_ = s.rag.DeleteSource(ctx, knowledgeSourceProject, id)
+	}
 	_, err := database.ExecCtx(ctx, s.db, `DELETE FROM site_projects WHERE id=$1`, id)
 	return err
 }
@@ -1263,16 +1305,27 @@ func (s *AdminDataService) SaveSiteTimelineEvent(ctx context.Context, id int64, 
 			}
 			newID, _ = result.LastInsertId()
 		}
-		return s.GetSiteTimelineEvent(ctx, newID)
+		item, err := s.GetSiteTimelineEvent(ctx, newID)
+		if err == nil && s.rag != nil {
+			_ = s.rag.SyncSiteTimelineEvent(ctx, item)
+		}
+		return item, err
 	}
 	_, err := database.ExecCtx(ctx, s.db, `UPDATE site_timeline_events SET title=$1,summary=$2,content=$3,phase=$4,event_type=$5,tags=$6,link_url=$7,status=$8,is_featured=$9,sort_order=$10,happened_at=$11,published_at=$12,updated_at=`+database.Now()+` WHERE id=$13`, strings.TrimSpace(input.Title), input.Summary, input.Content, input.Phase, eventType, input.Tags, input.LinkURL, status, input.IsFeatured, input.SortOrder, input.HappenedAt, publishedAt, id)
 	if err != nil {
 		return nil, err
 	}
-	return s.GetSiteTimelineEvent(ctx, id)
+	item, err := s.GetSiteTimelineEvent(ctx, id)
+	if err == nil && s.rag != nil {
+		_ = s.rag.SyncSiteTimelineEvent(ctx, item)
+	}
+	return item, err
 }
 
 func (s *AdminDataService) DeleteSiteTimelineEvent(ctx context.Context, id int64) error {
+	if s.rag != nil {
+		_ = s.rag.DeleteSource(ctx, "site_timeline", id)
+	}
 	_, err := database.ExecCtx(ctx, s.db, `DELETE FROM site_timeline_events WHERE id=$1`, id)
 	return err
 }
@@ -1463,6 +1516,129 @@ func (s *AdminDataService) SiteAnalytics(ctx context.Context) (*models.SiteAnaly
 }
 
 func (s *AdminDataService) AskSiteKnowledge(ctx context.Context, question string) (*models.SiteKnowledgeAnswer, error) {
+	if s.rag != nil {
+		return s.rag.AskSiteKnowledge(ctx, question, s.askSiteKnowledgeByKeywords)
+	}
+	return s.askSiteKnowledgeByKeywords(ctx, question)
+}
+
+func (s *AdminDataService) SaveRAGFeedback(ctx context.Context, queryLogID int64, question, rating, comment, ip, userAgent string) (*models.RAGFeedback, error) {
+	rating = strings.ToLower(strings.TrimSpace(rating))
+	if rating != "up" && rating != "down" {
+		rating = "neutral"
+	}
+	query := `INSERT INTO rag_feedback(query_log_id,question,rating,comment,ip_address,user_agent) VALUES($1,$2,$3,$4,$5,$6) RETURNING id`
+	args := []any{queryLogID, limitRunes(question, 2000), rating, limitRunes(comment, 2000), ip, userAgent}
+	var id int64
+	if database.CurrentDialect != nil && database.CurrentDialect.SupportsReturning() {
+		if err := database.QueryRowCtx(ctx, s.db, query, args...).Scan(&id); err != nil {
+			return nil, err
+		}
+	} else {
+		result, err := database.ExecCtx(ctx, s.db, strings.Replace(query, " RETURNING id", "", 1), args...)
+		if err != nil {
+			return nil, err
+		}
+		id, _ = result.LastInsertId()
+	}
+	item := &models.RAGFeedback{ID: id, QueryLogID: queryLogID, Question: question, Rating: rating, Comment: comment, IPAddress: ip, UserAgent: userAgent, CreatedAt: time.Now()}
+	return item, nil
+}
+
+func (s *AdminDataService) ExplainCode(ctx context.Context, code, language, question string) (string, error) {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return "请先选择一段需要解释的代码。", nil
+	}
+	client := NewAIClient(s.db)
+	if client.ChatEnabled() {
+		prompt := strings.TrimSpace(question)
+		if prompt == "" {
+			prompt = "请解释这段代码的作用、关键流程、可能的注意点，并给出一条改进建议。"
+		}
+		return client.Chat(ctx, ChatRequest{
+			System: "你是代码讲解助手。请使用中文，结构清晰，必要时使用 Markdown 标题和代码块。",
+			User:   fmt.Sprintf("语言：%s\n需求：%s\n\n代码：\n```%s\n%s\n```", language, prompt, language, code),
+		})
+	}
+	displayLanguage := strings.TrimSpace(language)
+	if displayLanguage == "" {
+		displayLanguage = "text"
+	}
+	return fmt.Sprintf("这是一段 %s 代码，共 %d 行。配置大模型后，我可以进一步解释代码逻辑、风险点和优化建议。\n\n```%s\n%s\n```", displayLanguage, len(strings.Split(code, "\n")), displayLanguage, limitRunes(code, 1200)), nil
+}
+
+func (s *AdminDataService) SummarizeSearch(ctx context.Context, query string) (*models.SiteKnowledgeAnswer, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return &models.SiteKnowledgeAnswer{Question: query, Answer: "请输入需要总结的搜索关键词。"}, nil
+	}
+	return s.AskSiteKnowledge(ctx, "请围绕搜索关键词「"+query+"」总结相关内容，并列出值得继续阅读的方向。")
+}
+
+func (s *AdminDataService) RAGIndexStats(ctx context.Context) (*models.RAGIndexStats, error) {
+	if s.rag == nil {
+		return nil, fmt.Errorf("rag service is not initialized")
+	}
+	return s.rag.Stats(ctx)
+}
+
+func (s *AdminDataService) RebuildRAGIndex(ctx context.Context) (*models.RAGIndexStats, error) {
+	if s.rag == nil {
+		return nil, fmt.Errorf("rag service is not initialized")
+	}
+	return s.rag.Rebuild(ctx)
+}
+
+func (s *AdminDataService) EnqueueRAGRebuild(ctx context.Context) (*models.RAGIndexJob, error) {
+	if s.rag == nil {
+		return nil, fmt.Errorf("rag service is not initialized")
+	}
+	return s.rag.EnqueueRebuild(ctx)
+}
+
+func (s *AdminDataService) RetryRAGIndexJob(ctx context.Context, id int64) (*models.RAGIndexJob, error) {
+	if s.rag == nil {
+		return nil, fmt.Errorf("rag service is not initialized")
+	}
+	return s.rag.RetryJob(ctx, id)
+}
+
+func (s *AdminDataService) ListRAGIndexJobs(ctx context.Context, limit int) ([]models.RAGIndexJob, error) {
+	if s.rag == nil {
+		return nil, fmt.Errorf("rag service is not initialized")
+	}
+	return s.rag.ListJobs(ctx, limit)
+}
+
+func (s *AdminDataService) ListRAGQueryLogs(ctx context.Context, limit int) ([]models.RAGQueryLog, error) {
+	if s.rag == nil {
+		return nil, fmt.Errorf("rag service is not initialized")
+	}
+	return s.rag.ListQueryLogs(ctx, limit)
+}
+
+func (s *AdminDataService) UploadDocument(ctx context.Context, file *multipart.FileHeader) (*models.UploadedDocument, error) {
+	return NewDocumentService(s.db).Upload(ctx, file)
+}
+
+func (s *AdminDataService) ListDocuments(ctx context.Context, page, pageSize int) ([]models.UploadedDocument, int64, error) {
+	return NewDocumentService(s.db).List(ctx, page, pageSize)
+}
+
+func (s *AdminDataService) PreviewDocument(ctx context.Context, id int64) (*models.UploadedDocument, error) {
+	return NewDocumentService(s.db).Preview(ctx, id)
+}
+
+func (s *AdminDataService) DeleteDocument(ctx context.Context, id int64) (int64, error) {
+	return NewDocumentService(s.db).Delete(ctx, id)
+}
+
+func (s *AdminDataService) RebuildDocument(ctx context.Context, id int64) (*models.UploadedDocument, error) {
+	return NewDocumentService(s.db).Rebuild(ctx, id)
+}
+
+func (s *AdminDataService) askSiteKnowledgeByKeywords(ctx context.Context, question string) (*models.SiteKnowledgeAnswer, error) {
 	question = strings.TrimSpace(question)
 	if question == "" {
 		return &models.SiteKnowledgeAnswer{Question: question, Answer: "可以问我关于 React、Go、数据库、项目经验或学习笔记的问题。"}, nil
@@ -1671,6 +1847,8 @@ func permissionLabel(code string) string {
 		"notifications:read":  "通知中心",
 		"notifications:write": "通知写入操作",
 		"ai:assistant":        "AI 助手",
+		"ai:models:read":      "大模型配置",
+		"ai:models:write":     "大模型配置写入",
 		"health:read":         "系统健康监控",
 		"database:read":       "数据库表结构",
 		"site:read":           "官网管理",
@@ -1725,6 +1903,8 @@ func menuForPermission(code string) models.PermissionTreeNode {
 		return models.PermissionTreeNode{ID: "/message/chat", Label: "聊天", Type: "menu"}
 	case "ai:assistant":
 		return models.PermissionTreeNode{ID: "/system-tools/ai-assistant", Label: "AI 助手", Type: "menu"}
+	case "ai:models:read":
+		return models.PermissionTreeNode{ID: "/system-tools/ai-models", Label: "大模型配置", Type: "menu"}
 	case "health:read":
 		return models.PermissionTreeNode{ID: "/system-tools/health", Label: "系统健康监控", Type: "menu"}
 	case "database:read":

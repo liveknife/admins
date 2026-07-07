@@ -40,15 +40,15 @@ func Setup(db *sql.DB) *gin.Engine {
 	// Swagger UI: /swagger/index.html (仅开发环境)
 	if !config.IsProduction() {
 		docs.Register(r, "/swagger", docs.Info{
-		Title:       "Admins Platform API",
-		Version:     "1.0.0",
-		Description: "后台管理平台 API 文档。所有以 `/api/v1/admin/*` 开头的路由需要 Bearer JWT，并按权限码授权。",
-		Schemas: []any{
-			models.User{}, models.TokenPair{}, models.SiteHome{}, models.SiteResource{},
-			models.SiteMessage{}, models.SiteProject{}, models.SiteTechStack{},
-			models.SiteAnnouncement{}, models.SiteBanner{}, models.SiteTimelineEvent{},
-			models.Notification{}, models.OperationLog{},
-		},
+			Title:       "Admins Platform API",
+			Version:     "1.0.0",
+			Description: "后台管理平台 API 文档。所有以 `/api/v1/admin/*` 开头的路由需要 Bearer JWT，并按权限码授权。",
+			Schemas: []any{
+				models.User{}, models.TokenPair{}, models.SiteHome{}, models.SiteResource{},
+				models.SiteMessage{}, models.SiteProject{}, models.SiteTechStack{},
+				models.SiteAnnouncement{}, models.SiteBanner{}, models.SiteTimelineEvent{},
+				models.Notification{}, models.OperationLog{},
+			},
 		}, docRoutes(specs))
 	}
 
@@ -61,11 +61,11 @@ func Setup(db *sql.DB) *gin.Engine {
 
 type routeSpec struct {
 	Method     string
-	Path       string       // Gin path，含 :id
+	Path       string // Gin path，含 :id
 	Handler    gin.HandlerFunc
 	Middleware []gin.HandlerFunc // 额外中间件（如限流）
-	Auth       bool         // 需要 Bearer JWT
-	Permission string       // 需要的权限码；空表示不校验
+	Auth       bool              // 需要 Bearer JWT
+	Permission string            // 需要的权限码；空表示不校验
 	Doc        docs.Op
 }
 
@@ -174,7 +174,7 @@ func buildRouteSpecs(
 		{Method: "POST", Path: "/api/v1/login", Handler: authCtrl.Login, Middleware: []gin.HandlerFunc{loginLimit}, Doc: docs.Op{
 			Summary: "登录", Tags: []string{"Auth"},
 			Description: "支持用户名 / 邮箱 / 手机号登录；密码必须先用 `/api/v1/password-public-key` 返回的公钥加密。",
-			Body: docs.Body{Required: true, Schema: controllers.LoginRequest{}},
+			Body:        docs.Body{Required: true, Schema: controllers.LoginRequest{}},
 			Responses: []docs.Resp{
 				{Schema: map[string]any{
 					"type": "object",
@@ -238,20 +238,36 @@ func buildRouteSpecs(
 			Summary: "官网知识库问答", Tags: []string{"Site (Public)"},
 			Body: docs.Body{Required: true, Schema: controllers.SiteKnowledgeRequest{}},
 		}},
+		{Method: "POST", Path: "/api/v1/site/knowledge/stream", Handler: adminCtrl.PublicSiteKnowledgeStream, Doc: docs.Op{
+			Summary: "官网知识库问答 SSE 流", Tags: []string{"Site (Public)"},
+			Body: docs.Body{Required: true, Schema: controllers.SiteKnowledgeRequest{}},
+		}},
+		{Method: "POST", Path: "/api/v1/site/feedback", Handler: adminCtrl.PublicSiteFeedback, Doc: docs.Op{
+			Summary: "提交 RAG 问答反馈", Tags: []string{"Site (Public)"},
+			Body: docs.Body{Required: true, Schema: controllers.SiteFeedbackRequest{}},
+		}},
+		{Method: "POST", Path: "/api/v1/site/code-explain", Handler: adminCtrl.PublicSiteCodeExplain, Doc: docs.Op{
+			Summary: "AI 解释代码片段", Tags: []string{"Site (Public)"},
+			Body: docs.Body{Required: true, Schema: controllers.SiteCodeExplainRequest{}},
+		}},
+		{Method: "POST", Path: "/api/v1/site/search/summarize", Handler: adminCtrl.PublicSiteSearchSummarize, Doc: docs.Op{
+			Summary: "搜索结果 AI 总结", Tags: []string{"Site (Public)"},
+			Body: docs.Body{Required: true, Schema: controllers.SiteSearchSummarizeRequest{}},
+		}},
 		{Method: "POST", Path: "/api/v1/site/messages", Handler: adminCtrl.PublicSiteMessage, Middleware: []gin.HandlerFunc{messageLimit}, Doc: docs.Op{
 			Summary: "提交访客留言", Tags: []string{"Site (Public)"},
 			Body: docs.Body{Required: true, Schema: controllers.SiteMessageRequest{}},
 		}},
 		{Method: "POST", Path: "/api/v1/site/visit", Handler: adminCtrl.PublicSiteVisit, Doc: docs.Op{
 			Summary: "上报访问统计", Tags: []string{"Site (Public)"},
-			Body: docs.Body{Schema: controllers.SiteVisitRequest{}},
+			Body:      docs.Body{Schema: controllers.SiteVisitRequest{}},
 			Responses: []docs.Resp{{Status: "204", Description: "已记录"}},
 		}},
 		{Method: "GET", Path: "/api/v1/chat/ws", Handler: chatCtrl.WebSocket, Doc: docs.Op{
 			Summary: "聊天 WebSocket 入口", Tags: []string{"Chat"},
 			Description: "通过 URL 参数 `token=<access_token>` 传递 JWT。协议升级到 WebSocket 后不再走 HTTP。",
-			Params: []docs.Param{{Name: "token", In: "query", Required: true, Description: "Bearer 访问令牌"}},
-			Responses: []docs.Resp{{Status: "101", Description: "Switching Protocols"}},
+			Params:      []docs.Param{{Name: "token", In: "query", Required: true, Description: "Bearer 访问令牌"}},
+			Responses:   []docs.Resp{{Status: "101", Description: "Switching Protocols"}},
 		}},
 
 		// ── 已登录：Me / 聊天 ──
@@ -266,12 +282,12 @@ func buildRouteSpecs(
 		{Method: "PUT", Path: "/api/v1/me/password", Handler: authCtrl.ChangeMyPassword, Auth: true, Middleware: []gin.HandlerFunc{passwordLimit}, Doc: docs.Op{
 			Summary: "修改当前用户密码", Tags: []string{"Profile"},
 			Description: "旧密码与新密码都必须先经 RSA-OAEP-SHA256 加密。",
-			Body: docs.Body{Required: true, Schema: controllers.ChangePasswordRequest{}},
+			Body:        docs.Body{Required: true, Schema: controllers.ChangePasswordRequest{}},
 		}},
 		{Method: "POST", Path: "/api/v1/me/avatar", Handler: authCtrl.UploadAvatar, Auth: true, Middleware: []gin.HandlerFunc{avatarLimit}, Doc: docs.Op{
 			Summary: "上传头像", Tags: []string{"Profile"},
 			Description: "`multipart/form-data`，字段名 `file`，允许 jpg/png/webp/gif，最大 5 MB。",
-			Responses: []docs.Resp{{Schema: map[string]any{"type": "object", "properties": map[string]any{"avatar_url": map[string]any{"type": "string"}}}}},
+			Responses:   []docs.Resp{{Schema: map[string]any{"type": "object", "properties": map[string]any{"avatar_url": map[string]any{"type": "string"}}}}},
 		}},
 
 		{Method: "GET", Path: "/api/v1/chat/users", Handler: chatCtrl.ListUsers, Auth: true, Permission: "messages:chat", Doc: docs.Op{Summary: "聊天用户列表", Tags: []string{"Chat"}}},
@@ -322,6 +338,22 @@ func buildRouteSpecs(
 
 		// ── Admin：AI & 系统健康 ──
 		{Method: "POST", Path: "/api/v1/admin/ai/ask", Handler: adminCtrl.AskAssistant, Auth: true, Permission: "ai:assistant", Doc: docs.Op{Summary: "AI 助手提问", Tags: []string{"Admin · System"}, Body: docs.Body{Required: true, Schema: controllers.AskAssistantRequest{}}}},
+		{Method: "GET", Path: "/api/v1/admin/ai/model-configs", Handler: adminCtrl.ListAIModelConfigs, Auth: true, Permission: "ai:models:read", Doc: docs.Op{Summary: "大模型配置列表", Tags: []string{"Admin · System"}}},
+		{Method: "POST", Path: "/api/v1/admin/ai/model-configs", Handler: adminCtrl.SaveAIModelConfig, Auth: true, Permission: "ai:models:write", Doc: docs.Op{Summary: "创建大模型配置", Tags: []string{"Admin · System"}, Body: docs.Body{Required: true, Schema: controllers.AIModelConfigRequest{}}}},
+		{Method: "PUT", Path: "/api/v1/admin/ai/model-configs/:id", Handler: adminCtrl.SaveAIModelConfig, Auth: true, Permission: "ai:models:write", Doc: docs.Op{Summary: "更新大模型配置", Tags: []string{"Admin · System"}, Body: docs.Body{Required: true, Schema: controllers.AIModelConfigRequest{}}}},
+		{Method: "POST", Path: "/api/v1/admin/ai/model-configs/:id/default", Handler: adminCtrl.SetDefaultAIModelConfig, Auth: true, Permission: "ai:models:write", Doc: docs.Op{Summary: "启用大模型配置", Tags: []string{"Admin · System"}}},
+		{Method: "POST", Path: "/api/v1/admin/ai/model-configs/:id/test", Handler: adminCtrl.TestAIModelConfig, Auth: true, Permission: "ai:models:write", Doc: docs.Op{Summary: "测试大模型配置", Tags: []string{"Admin · System"}}},
+		{Method: "DELETE", Path: "/api/v1/admin/ai/model-configs/:id", Handler: adminCtrl.DeleteAIModelConfig, Auth: true, Permission: "ai:models:write", Doc: docs.Op{Summary: "删除大模型配置", Tags: []string{"Admin · System"}}},
+		{Method: "GET", Path: "/api/v1/admin/ai/rag/stats", Handler: adminCtrl.RAGIndexStats, Auth: true, Permission: "ai:assistant", Doc: docs.Op{Summary: "RAG 知识索引状态", Tags: []string{"Admin · System"}}},
+		{Method: "POST", Path: "/api/v1/admin/ai/rag/reindex", Handler: adminCtrl.RebuildRAGIndex, Auth: true, Permission: "ai:assistant", Doc: docs.Op{Summary: "重建 RAG 知识索引", Tags: []string{"Admin · System"}}},
+		{Method: "GET", Path: "/api/v1/admin/ai/rag/jobs", Handler: adminCtrl.ListRAGIndexJobs, Auth: true, Permission: "ai:assistant", Doc: docs.Op{Summary: "RAG 索引任务列表", Tags: []string{"Admin · System"}}},
+		{Method: "POST", Path: "/api/v1/admin/ai/rag/jobs/:id/retry", Handler: adminCtrl.RetryRAGIndexJob, Auth: true, Permission: "ai:assistant", Doc: docs.Op{Summary: "重试 RAG 索引任务", Tags: []string{"Admin · System"}}},
+		{Method: "GET", Path: "/api/v1/admin/ai/rag/query-logs", Handler: adminCtrl.ListRAGQueryLogs, Auth: true, Permission: "ai:assistant", Doc: docs.Op{Summary: "RAG 问答日志", Tags: []string{"Admin · System"}}},
+		{Method: "POST", Path: "/api/v1/admin/documents/upload", Handler: adminCtrl.UploadDocument, Auth: true, Permission: "ai:assistant", Doc: docs.Op{Summary: "上传 RAG 文档", Tags: []string{"Admin · RAG"}}},
+		{Method: "GET", Path: "/api/v1/admin/documents", Handler: adminCtrl.ListDocuments, Auth: true, Permission: "ai:assistant", Doc: docs.Op{Summary: "RAG 文档列表", Tags: []string{"Admin · RAG"}, Params: pageQuery}},
+		{Method: "GET", Path: "/api/v1/admin/documents/:id/preview", Handler: adminCtrl.PreviewDocument, Auth: true, Permission: "ai:assistant", Doc: docs.Op{Summary: "预览 RAG 文档文本", Tags: []string{"Admin · RAG"}}},
+		{Method: "DELETE", Path: "/api/v1/admin/documents/:id", Handler: adminCtrl.DeleteDocument, Auth: true, Permission: "ai:assistant", Doc: docs.Op{Summary: "删除 RAG 文档", Tags: []string{"Admin · RAG"}}},
+		{Method: "POST", Path: "/api/v1/admin/documents/:id/rebuild", Handler: adminCtrl.RebuildDocument, Auth: true, Permission: "ai:assistant", Doc: docs.Op{Summary: "重建 RAG 文档索引", Tags: []string{"Admin · RAG"}}},
 		{Method: "GET", Path: "/api/v1/admin/health", Handler: adminCtrl.SystemHealth, Auth: true, Permission: "health:read", Doc: docs.Op{Summary: "系统健康监控", Tags: []string{"Admin · System"}}},
 		{Method: "GET", Path: "/api/v1/admin/database/catalog", Handler: adminCtrl.DatabaseCatalog, Auth: true, Permission: "database:read", Doc: docs.Op{Summary: "数据库元信息 (catalog)", Tags: []string{"Admin · System"}}},
 		{Method: "GET", Path: "/api/v1/admin/database/tables", Handler: adminCtrl.ListDatabaseTables, Auth: true, Permission: "database:read", Doc: docs.Op{Summary: "数据库表列表", Tags: []string{"Admin · System"}}},

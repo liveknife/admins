@@ -97,12 +97,104 @@ export type RolePermissionPreview = {
   permissions: string[];
 };
 
+export type KnowledgeSource = {
+  source_type: string;
+  source_id: number;
+  title: string;
+  summary: string;
+  score: number;
+  url?: string;
+  snippet?: string;
+  highlighted_text?: string;
+};
+
 export type AIAssistantResult = {
   question: string;
   answer: string;
   insights: string[];
   rows: Array<Record<string, any>>;
   metrics: Record<string, number>;
+  sources?: KnowledgeSource[];
+};
+
+export type RAGIndexStats = {
+  total_chunks: number;
+  by_source: Record<string, number>;
+  top_k: number;
+  chat_enabled: boolean;
+  vector_backend: string;
+  pgvector_available: boolean;
+  updated_at?: string;
+  latest_job?: RAGIndexJob;
+  query_count: number;
+  hit_count: number;
+  average_latency_ms: number;
+  average_source_count: number;
+};
+
+export type RAGIndexJob = {
+  id: number;
+  job_type: string;
+  status: string;
+  retry_count: number;
+  max_retries: number;
+  error_message: string;
+  started_at?: string;
+  finished_at?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RAGQueryLog = {
+  id: number;
+  question: string;
+  answer: string;
+  matched: boolean;
+  source_count: number;
+  top_score: number;
+  latency_ms: number;
+  used_chat_model: boolean;
+  source_json: string;
+  created_at: string;
+};
+
+export type UploadedDocument = {
+  id: number;
+  original_name: string;
+  file_name: string;
+  file_path: string;
+  mime_type: string;
+  file_size: number;
+  text_content: string;
+  chunk_count: number;
+  status: string;
+  error_message: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AIModelConfig = {
+  id: number;
+  name: string;
+  provider: string;
+  api_format: string;
+  base_url: string;
+  chat_model: string;
+  embedding_model: string;
+  api_key?: string;
+  has_api_key: boolean;
+  masked_api_key?: string;
+  temperature: number;
+  max_tokens: number;
+  timeout_seconds: number;
+  extra_json: string;
+  is_default: boolean;
+  enabled: boolean;
+  last_test_status: string;
+  last_test_message: string;
+  last_test_at?: string;
+  created_at: string;
+  updated_at: string;
 };
 
 export type SystemHealth = {
@@ -547,6 +639,122 @@ export const askAIAssistant = (question: string) => {
     "/api/v1/admin/ai/ask",
     { data: { question } }
   );
+};
+
+export const getAIModelConfigs = () => {
+  return http.request<{ configs: AIModelConfig[] }>(
+    "get",
+    "/api/v1/admin/ai/model-configs"
+  );
+};
+
+export const saveAIModelConfig = (
+  data: Partial<AIModelConfig>,
+  id?: number
+) => {
+  return http.request<{ config: AIModelConfig }>(
+    id ? "put" : "post",
+    id
+      ? `/api/v1/admin/ai/model-configs/${id}`
+      : "/api/v1/admin/ai/model-configs",
+    { data }
+  );
+};
+
+export const setDefaultAIModelConfig = (id: number) => {
+  return http.request<{ config: AIModelConfig }>(
+    "post",
+    `/api/v1/admin/ai/model-configs/${id}/default`
+  );
+};
+
+export const testAIModelConfig = (id: number) => {
+  return http.request<{ config: AIModelConfig }>(
+    "post",
+    `/api/v1/admin/ai/model-configs/${id}/test`
+  );
+};
+
+export const deleteAIModelConfig = (id: number) => {
+  return http.request<void>("delete", `/api/v1/admin/ai/model-configs/${id}`);
+};
+
+export const getRAGIndexStats = () => {
+  return http.request<{ stats: RAGIndexStats }>(
+    "get",
+    "/api/v1/admin/ai/rag/stats"
+  );
+};
+
+export const rebuildRAGIndex = () => {
+  return http.request<{ job: RAGIndexJob }>(
+    "post",
+    "/api/v1/admin/ai/rag/reindex"
+  );
+};
+
+export const getRAGIndexJobs = (limit = 20) => {
+  return http.request<{ jobs: RAGIndexJob[] }>(
+    "get",
+    "/api/v1/admin/ai/rag/jobs",
+    { params: { limit } }
+  );
+};
+
+export const retryRAGIndexJob = (id: number) => {
+  return http.request<{ job: RAGIndexJob }>(
+    "post",
+    `/api/v1/admin/ai/rag/jobs/${id}/retry`
+  );
+};
+
+export const getRAGQueryLogs = (limit = 30) => {
+  return http.request<{ logs: RAGQueryLog[] }>(
+    "get",
+    "/api/v1/admin/ai/rag/query-logs",
+    { params: { limit } }
+  );
+};
+
+export const getUploadedDocuments = (params?: PageParams) => {
+  return http.request<PagedResult<"documents", UploadedDocument>>(
+    "get",
+    "/api/v1/admin/documents",
+    { params }
+  );
+};
+
+export const uploadDocument = (file: File) => {
+  const formData = new FormData();
+  formData.append("file", file);
+  return http.request<{ document: UploadedDocument }>(
+    "post",
+    "/api/v1/admin/documents/upload",
+    {
+      data: formData,
+      headers: {
+        "Content-Type": "multipart/form-data"
+      }
+    }
+  );
+};
+
+export const previewDocument = (id: number) => {
+  return http.request<{ document: UploadedDocument }>(
+    "get",
+    `/api/v1/admin/documents/${id}/preview`
+  );
+};
+
+export const rebuildDocument = (id: number) => {
+  return http.request<{ document: UploadedDocument }>(
+    "post",
+    `/api/v1/admin/documents/${id}/rebuild`
+  );
+};
+
+export const deleteDocument = (id: number) => {
+  return http.request<void>("delete", `/api/v1/admin/documents/${id}`);
 };
 
 export const getSystemHealth = () => {

@@ -21,6 +21,106 @@ import { ArticleDetail } from "./ArticleDetail";
 import { SearchPage } from "./SearchPage";
 import { CodeDemoPage } from "./CodeDemo";
 
+type AnswerBlock =
+  | { type: "heading"; text: string }
+  | { type: "paragraph"; text: string }
+  | { type: "list"; items: string[] }
+  | { type: "code"; language: string; code: string };
+
+function answerTitle(question: string, answer?: string) {
+  const firstHeading = answer?.split(/\r?\n/).find(line => /^#{1,4}\s+/.test(line.trim()));
+  if (firstHeading) return firstHeading.replace(/^#{1,4}\s+/, "").trim();
+  return question.trim() ? `\u56de\u7b54\uff1a${question.trim()}` : "\u77e5\u8bc6\u5e93\u56de\u7b54";
+}
+
+function answerBlocks(markdown?: string): AnswerBlock[] {
+  const text = (markdown || "").trim();
+  if (!text) return [];
+  const blocks: AnswerBlock[] = [];
+  const fencePattern = /```([a-zA-Z0-9_-]*)\s*([\s\S]*?)```/g;
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  while ((match = fencePattern.exec(text))) {
+    pushTextBlocks(text.slice(cursor, match.index), blocks);
+    blocks.push({ type: "code", language: match[1] || "text", code: match[2].trim() });
+    cursor = match.index + match[0].length;
+  }
+  pushTextBlocks(text.slice(cursor), blocks);
+  return blocks;
+}
+
+function pushTextBlocks(text: string, blocks: AnswerBlock[]) {
+  const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  let listItems: string[] = [];
+  const flushList = () => {
+    if (listItems.length) {
+      blocks.push({ type: "list", items: listItems });
+      listItems = [];
+    }
+  };
+  lines.forEach(line => {
+    const heading = line.match(/^#{1,4}\s+(.+)$/);
+    if (heading) {
+      flushList();
+      blocks.push({ type: "heading", text: heading[1].trim() });
+      return;
+    }
+    const list = line.match(/^[-*]\s+(.+)$/);
+    if (list) {
+      listItems.push(list[1].trim());
+      return;
+    }
+    flushList();
+    blocks.push({ type: "paragraph", text: line });
+  });
+  flushList();
+}
+
+function InlineMarkdown({ text }: { text: string }) {
+  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g).filter(Boolean);
+  return (
+    <>
+      {parts.map((part, index) => {
+        if (part.startsWith("`") && part.endsWith("`")) {
+          return <code key={index}>{part.slice(1, -1)}</code>;
+        }
+        if (part.startsWith("**") && part.endsWith("**")) {
+          return <strong key={index}>{part.slice(2, -2)}</strong>;
+        }
+        return <React.Fragment key={index}>{part}</React.Fragment>;
+      })}
+    </>
+  );
+}
+
+function AnswerContent({ answer }: { answer?: string }) {
+  const blocks = answerBlocks(answer);
+  if (!blocks.length) {
+    return <p>{"\u8fd9\u4e2a\u5165\u53e3\u4f1a\u57fa\u4e8e\u4f60\u5728\u540e\u53f0\u53d1\u5e03\u7684\u6587\u7ae0\u3001\u7b14\u8bb0\u548c\u9879\u76ee\u5185\u5bb9\u505a\u672c\u5730\u68c0\u7d22\u5f0f\u56de\u7b54\u3002"}</p>;
+  }
+  return (
+    <div className="answerBody">
+      {blocks.map((block, index) => {
+        if (block.type === "heading") {
+          return <h4 key={index}><InlineMarkdown text={block.text} /></h4>;
+        }
+        if (block.type === "list") {
+          return <ul key={index}>{block.items.map((item, itemIndex) => <li key={itemIndex}><InlineMarkdown text={item} /></li>)}</ul>;
+        }
+        if (block.type === "code") {
+          return (
+            <figure className="answerCode" key={index}>
+              <figcaption>{block.language}</figcaption>
+              <pre><code>{block.code}</code></pre>
+            </figure>
+          );
+        }
+        return <p key={index}><InlineMarkdown text={block.text} /></p>;
+      })}
+    </div>
+  );
+}
+
 function KnowledgeAsk({ resources }: { resources: SiteResource[] }) {
   const [question, setQuestion] = useState("React 项目经验怎么总结？");
   const [answer, setAnswer] = useState<KnowledgeAnswer | null>(null);
@@ -49,7 +149,7 @@ function KnowledgeAsk({ resources }: { resources: SiteResource[] }) {
         <h2>问我的知识库</h2>
       </div>
       <div className="askPanel">
-        <div>
+        <div className="askInputCard">
           <textarea
             value={question}
             onChange={event => setQuestion(event.target.value)}
@@ -58,14 +158,26 @@ function KnowledgeAsk({ resources }: { resources: SiteResource[] }) {
           <button onClick={ask} disabled={asking}>{asking ? "检索中..." : "提问"}</button>
         </div>
         <div className="answerPanel">
-          <span>{resources.length} 篇已发布内容可检索</span>
-          <p>{answer?.answer ?? "这个入口会基于你在后台发布的文章、笔记和项目内容做本地检索式回答。"}</p>
+          <div className="answerHeader">
+            <span>{resources.length} {"\u7bc7\u5df2\u53d1\u5e03\u5185\u5bb9\u53ef\u68c0\u7d22"}</span>
+            <h3>{answerTitle(question, answer?.answer)}</h3>
+          </div>
+          <AnswerContent answer={answer?.answer} />
           {!!answer?.sources?.length && (
             <div className="answerSources">
               {answer.sources.slice(0, 4).map(item => (
                 <div key={`${item.source_type}-${item.source_id}-${item.title}`}>
-                  <strong>{item.title}</strong>
+                  {item.url ? (
+                    <a href={item.url} target={item.url.startsWith("http") ? "_blank" : undefined} rel="noreferrer">
+                      {item.title}
+                    </a>
+                  ) : (
+                    <strong>{item.title}</strong>
+                  )}
                   <small>{item.source_type} #{item.source_id} · {Math.round(item.score * 100)}%</small>
+                  {item.highlighted_text && (
+                    <p dangerouslySetInnerHTML={{ __html: item.highlighted_text }} />
+                  )}
                 </div>
               ))}
             </div>
@@ -90,6 +202,160 @@ function KnowledgeAsk({ resources }: { resources: SiteResource[] }) {
         </div>
       </div>
     </section>
+  );
+}
+
+type ChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  sources?: KnowledgeAnswer["sources"];
+  suggestions?: string[];
+  queryLogId?: number;
+  feedback?: "up" | "down";
+};
+
+function AskPage() {
+  const initialQuestion = new URLSearchParams(window.location.hash.split("?")[1] || "").get("q") || "";
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    { id: "welcome", role: "assistant", content: "你好，我可以基于已发布的文章、项目、技术栈和时间线回答问题。" }
+  ]);
+  const [input, setInput] = useState(initialQuestion);
+  const [loading, setLoading] = useState(false);
+
+  const submit = async (value = input) => {
+    const question = value.trim();
+    if (!question || loading) return;
+    const userMessage: ChatMessage = { id: `u-${Date.now()}`, role: "user", content: question };
+    const assistantID = `a-${Date.now()}`;
+    setMessages(prev => [...prev, userMessage, { id: assistantID, role: "assistant", content: "" }]);
+    setInput("");
+    setLoading(true);
+    try {
+      const context = messages.slice(-5).map(item => ({ role: item.role, content: item.content }));
+      const res = await fetch(`${apiBase}/api/v1/site/knowledge/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question, context })
+      });
+      if (!res.body) throw new Error("stream unavailable");
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      const applyEvent = (raw: string) => {
+        const event = raw.match(/^event:\s*(.+)$/m)?.[1]?.trim() || "message";
+        const dataText = raw.match(/^data:\s*([\s\S]*)$/m)?.[1]?.trim();
+        if (!dataText) return;
+        const data = JSON.parse(dataText);
+        if (event === "token") {
+          setMessages(prev => prev.map(item => item.id === assistantID ? { ...item, content: item.content + (data.content || "") } : item));
+        }
+        if (event === "sources") {
+          setMessages(prev => prev.map(item => item.id === assistantID ? { ...item, sources: data } : item));
+        }
+        if (event === "suggestions") {
+          setMessages(prev => prev.map(item => item.id === assistantID ? { ...item, suggestions: data } : item));
+        }
+        if (event === "done" && data.answer) {
+          setMessages(prev => prev.map(item => item.id === assistantID ? {
+            ...item,
+            content: data.answer.answer || item.content,
+            sources: data.answer.sources,
+            suggestions: data.answer.suggestions,
+            queryLogId: data.answer.query_log_id
+          } : item));
+        }
+      };
+      for (;;) {
+        const { done, value: chunk } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(chunk, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() || "";
+        parts.forEach(applyEvent);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const feedback = async (message: ChatMessage, rating: "up" | "down") => {
+    await fetch(`${apiBase}/api/v1/site/feedback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query_log_id: message.queryLogId || 0, question: message.content, rating })
+    }).catch(() => undefined);
+    setMessages(prev => prev.map(item => item.id === message.id ? { ...item, feedback: rating } : item));
+  };
+
+  return (
+    <section className="askPage">
+      <header className="askTopbar">
+        <a className="brand" href="#/">Tech Lab</a>
+        <div>
+          <a href="#/">Home</a>
+          <a href="#/search">Search</a>
+          <button type="button" onClick={() => setMessages([])}>New chat</button>
+        </div>
+      </header>
+      <div className="chatShell">
+        <aside className="chatSide">
+          <strong>AI Ask</strong>
+          <p>Use published knowledge, project notes, timeline and stack records.</p>
+          {messages.filter(item => item.role === "user").slice(-6).map(item => (
+            <button key={item.id} type="button" onClick={() => submit(item.content)}>{item.content}</button>
+          ))}
+        </aside>
+        <main className="chatMain">
+          <div className="chatMessages">
+            {messages.map(item => (
+              <article key={item.id} className={`chatBubble ${item.role}`}>
+                <div className="bubbleAvatar">{item.role === "user" ? "You" : "AI"}</div>
+                <div className="bubbleBody">
+                  {item.content ? <AnswerContent answer={item.content} /> : <div className="typingDots"><i /><i /><i /></div>}
+                  {!!item.sources?.length && <SourceCards sources={item.sources} />}
+                  {item.role === "assistant" && item.content && (
+                    <div className="bubbleActions">
+                      <button type="button" className={item.feedback === "up" ? "active" : ""} onClick={() => feedback(item, "up")}>Good</button>
+                      <button type="button" className={item.feedback === "down" ? "active" : ""} onClick={() => feedback(item, "down")}>Bad</button>
+                    </div>
+                  )}
+                  {!!item.suggestions?.length && (
+                    <div className="suggestionRow">
+                      {item.suggestions.map(suggestion => <button key={suggestion} type="button" onClick={() => submit(suggestion)}>{suggestion}</button>)}
+                    </div>
+                  )}
+                </div>
+              </article>
+            ))}
+          </div>
+          <form className="chatComposer" onSubmit={event => { event.preventDefault(); submit(); }}>
+            <textarea value={input} onChange={event => setInput(event.target.value)} placeholder="Ask about articles, projects, code or timeline..." />
+            <button type="submit" disabled={loading}>{loading ? "Thinking" : "Send"}</button>
+          </form>
+        </main>
+      </div>
+    </section>
+  );
+}
+
+function SourceCards({ sources }: { sources: NonNullable<KnowledgeAnswer["sources"]> }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div className="sourceBlock">
+      <button type="button" onClick={() => setOpen(value => !value)}>{open ? "Hide sources" : "Show sources"} ({sources.length})</button>
+      {open && (
+        <div className="answerSources">
+          {sources.slice(0, 4).map(item => (
+            <div key={`${item.source_type}-${item.source_id}-${item.title}`}>
+              {item.url ? <a href={item.url}>{item.title}</a> : <strong>{item.title}</strong>}
+              <small>{item.source_type} #{item.source_id} - {Math.round(item.score * 100)}%</small>
+              {item.highlighted_text && <p dangerouslySetInnerHTML={{ __html: item.highlighted_text }} />}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -455,6 +721,7 @@ function HomePage({ home, loading }: { home: SiteHome; loading: boolean }) {
           <div>
             <a href="#resources">学习</a>
             <a href="#ask">问答</a>
+            <a href="#/ask">AI 问答</a>
             <a href="#stack">技术栈</a>
             <a href="#galaxy">星图</a>
             <a href="#demos">Demo</a>
@@ -658,12 +925,14 @@ function App() {
       {showTopBar && (
         <nav className="innerNav">
           <a className="brand" href="#/">Tech Lab</a>
+          <a href="#/ask">AI 问答</a>
           <a href={searchHash("")}>搜索</a>
         </nav>
       )}
       {route.name === "home" && <HomePage home={home} loading={loading} />}
       {route.name === "article" && <ArticleDetail slug={route.slug} />}
       {route.name === "demo" && <CodeDemoPage />}
+      {route.name === "ask" && <AskPage />}
       {route.name === "search" && (
         <SearchPage
           query={route.q}

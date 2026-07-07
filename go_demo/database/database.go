@@ -398,6 +398,9 @@ func migrate(db *sql.DB, d *Dialect) error {
 	if err := ensureColumns(db, d); err != nil {
 		return err
 	}
+	if err := ensurePGVector(db, d); err != nil {
+		fmt.Printf("[WARN] pgvector setup skipped: %v\n", err)
+	}
 	if err := ensureComments(db, d); err != nil {
 		return err
 	}
@@ -432,6 +435,12 @@ func buildCreateTables(d *Dialect) []string {
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS site_timeline_events(id %s,title VARCHAR(180) NOT NULL,summary VARCHAR(500) NOT NULL DEFAULT '',content TEXT NOT NULL DEFAULT '',phase VARCHAR(100) NOT NULL DEFAULT '',event_type VARCHAR(60) NOT NULL DEFAULT 'learning',tags VARCHAR(500) NOT NULL DEFAULT '',link_url VARCHAR(1024) NOT NULL DEFAULT '',status VARCHAR(20) NOT NULL DEFAULT 'draft',is_featured BOOLEAN NOT NULL DEFAULT FALSE,sort_order INT NOT NULL DEFAULT 0,happened_at %s,published_at %s,created_at %s NOT NULL DEFAULT %s,updated_at %s NOT NULL DEFAULT %s)`, pk, ts, ts, ts, now, ts, now),
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS site_messages(id %s,visitor_name VARCHAR(120) NOT NULL DEFAULT '',email VARCHAR(255) NOT NULL DEFAULT '',content TEXT NOT NULL DEFAULT '',reply TEXT NOT NULL DEFAULT '',status VARCHAR(20) NOT NULL DEFAULT 'pending',is_public BOOLEAN NOT NULL DEFAULT TRUE,ip_address VARCHAR(80) NOT NULL DEFAULT '',user_agent TEXT NOT NULL DEFAULT '',created_at %s NOT NULL DEFAULT %s,updated_at %s NOT NULL DEFAULT %s)`, pk, ts, now, ts, now),
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS site_visits(id %s,path VARCHAR(1024) NOT NULL DEFAULT '/',referrer VARCHAR(1024) NOT NULL DEFAULT '',device VARCHAR(40) NOT NULL DEFAULT 'desktop',ip_address VARCHAR(80) NOT NULL DEFAULT '',user_agent TEXT NOT NULL DEFAULT '',created_at %s NOT NULL DEFAULT %s)`, pk, ts, now),
+		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS knowledge_chunks(id %s,source_type VARCHAR(80) NOT NULL,source_id BIGINT NOT NULL,title VARCHAR(240) NOT NULL DEFAULT '',summary VARCHAR(600) NOT NULL DEFAULT '',content TEXT NOT NULL,metadata_json TEXT NOT NULL DEFAULT '',embedding_json TEXT NOT NULL DEFAULT '',content_hash VARCHAR(64) NOT NULL,token_count INT NOT NULL DEFAULT 0,status VARCHAR(20) NOT NULL DEFAULT 'active',created_at %s NOT NULL DEFAULT %s,updated_at %s NOT NULL DEFAULT %s)`, pk, ts, now, ts, now),
+		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS rag_index_jobs(id %s,job_type VARCHAR(40) NOT NULL DEFAULT 'rebuild',status VARCHAR(20) NOT NULL DEFAULT 'pending',retry_count INT NOT NULL DEFAULT 0,max_retries INT NOT NULL DEFAULT 3,error_message TEXT NOT NULL DEFAULT '',started_at %s,finished_at %s,created_at %s NOT NULL DEFAULT %s,updated_at %s NOT NULL DEFAULT %s)`, pk, ts, ts, ts, now, ts, now),
+		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS rag_query_logs(id %s,question TEXT NOT NULL,answer TEXT NOT NULL DEFAULT '',matched BOOLEAN NOT NULL DEFAULT FALSE,source_count INT NOT NULL DEFAULT 0,top_score DOUBLE PRECISION NOT NULL DEFAULT 0,latency_ms BIGINT NOT NULL DEFAULT 0,used_chat_model BOOLEAN NOT NULL DEFAULT FALSE,source_json TEXT NOT NULL DEFAULT '',created_at %s NOT NULL DEFAULT %s)`, pk, ts, now),
+		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS rag_feedback(id %s,query_log_id BIGINT NOT NULL DEFAULT 0,question TEXT NOT NULL DEFAULT '',rating VARCHAR(20) NOT NULL DEFAULT '',comment TEXT NOT NULL DEFAULT '',ip_address VARCHAR(80) NOT NULL DEFAULT '',user_agent TEXT NOT NULL DEFAULT '',created_at %s NOT NULL DEFAULT %s)`, pk, ts, now),
+		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS uploaded_documents(id %s,original_name VARCHAR(255) NOT NULL DEFAULT '',file_name VARCHAR(255) NOT NULL DEFAULT '',file_path VARCHAR(1024) NOT NULL DEFAULT '',mime_type VARCHAR(160) NOT NULL DEFAULT '',file_size BIGINT NOT NULL DEFAULT 0,text_content TEXT NOT NULL DEFAULT '',chunk_count INT NOT NULL DEFAULT 0,status VARCHAR(24) NOT NULL DEFAULT 'processing',error_message TEXT NOT NULL DEFAULT '',created_at %s NOT NULL DEFAULT %s,updated_at %s NOT NULL DEFAULT %s)`, pk, ts, now, ts, now),
+		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS ai_model_configs(id %s,name VARCHAR(120) NOT NULL,provider VARCHAR(60) NOT NULL DEFAULT 'openai',api_format VARCHAR(40) NOT NULL DEFAULT 'openai',base_url VARCHAR(1024) NOT NULL DEFAULT '',api_key TEXT NOT NULL DEFAULT '',chat_model VARCHAR(160) NOT NULL DEFAULT '',embedding_model VARCHAR(160) NOT NULL DEFAULT '',temperature DOUBLE PRECISION NOT NULL DEFAULT 0.2,max_tokens INT NOT NULL DEFAULT 0,timeout_seconds INT NOT NULL DEFAULT 45,extra_json TEXT NOT NULL DEFAULT '',is_default BOOLEAN NOT NULL DEFAULT FALSE,enabled BOOLEAN NOT NULL DEFAULT TRUE,last_test_status VARCHAR(20) NOT NULL DEFAULT '',last_test_message TEXT NOT NULL DEFAULT '',last_test_at %s,created_at %s NOT NULL DEFAULT %s,updated_at %s NOT NULL DEFAULT %s)`, pk, ts, ts, now, ts, now),
 	}
 }
 
@@ -487,6 +496,25 @@ func ensureColumns(db *sql.DB, d *Dialect) error {
 				return fmt.Errorf("add site resource column %s: %w", col, err)
 			}
 		}
+	}
+	return nil
+}
+
+func ensurePGVector(db *sql.DB, d *Dialect) error {
+	if d.Type != DBTypePostgres {
+		return nil
+	}
+	if _, err := db.Exec(`CREATE EXTENSION IF NOT EXISTS vector`); err != nil {
+		return err
+	}
+	if !columnExists(db, d, "knowledge_chunks", "embedding_vector") {
+		dim := envInt("RAG_VECTOR_DIM", 256)
+		if _, err := db.Exec(fmt.Sprintf(`ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS embedding_vector vector(%d)`, dim)); err != nil {
+			return err
+		}
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_embedding_vector ON knowledge_chunks USING hnsw (embedding_vector vector_cosine_ops) WHERE embedding_vector IS NOT NULL`); err != nil {
+		fmt.Printf("[WARN] pgvector hnsw index skipped: %v\n", err)
 	}
 	return nil
 }
@@ -1075,6 +1103,13 @@ func buildIndexes(d *Dialect) []string {
 		`CREATE INDEX IF NOT EXISTS idx_site_messages_status ON site_messages(status, is_public, id DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_site_visits_created ON site_visits(created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_site_visits_path ON site_visits(path, created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_source ON knowledge_chunks(source_type, source_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_status ON knowledge_chunks(status, updated_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_rag_index_jobs_status ON rag_index_jobs(status, updated_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_rag_query_logs_created ON rag_query_logs(created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_rag_feedback_query ON rag_feedback(query_log_id, created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_uploaded_documents_status ON uploaded_documents(status, updated_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_ai_model_configs_default ON ai_model_configs(enabled, is_default, updated_at DESC)`,
 	}
 	mysqlIdx := []string{
 		`CREATE INDEX idx_users_phone ON users(phone)`,
@@ -1093,6 +1128,13 @@ func buildIndexes(d *Dialect) []string {
 		`CREATE INDEX idx_site_messages_status ON site_messages(status, is_public, id)`,
 		`CREATE INDEX idx_site_visits_created ON site_visits(created_at)`,
 		`CREATE INDEX idx_site_visits_path ON site_visits(path, created_at)`,
+		`CREATE INDEX idx_knowledge_chunks_source ON knowledge_chunks(source_type, source_id)`,
+		`CREATE INDEX idx_knowledge_chunks_status ON knowledge_chunks(status, updated_at)`,
+		`CREATE INDEX idx_rag_index_jobs_status ON rag_index_jobs(status, updated_at)`,
+		`CREATE INDEX idx_rag_query_logs_created ON rag_query_logs(created_at)`,
+		`CREATE INDEX idx_rag_feedback_query ON rag_feedback(query_log_id, created_at)`,
+		`CREATE INDEX idx_uploaded_documents_status ON uploaded_documents(status, updated_at)`,
+		`CREATE INDEX idx_ai_model_configs_default ON ai_model_configs(enabled, is_default, updated_at)`,
 	}
 	switch d.Type {
 	case DBTypePostgres:
@@ -1126,7 +1168,7 @@ func seedRBAC(db *sql.DB, d *Dialect) error {
 		{"dashboard:read", "View dashboard data"}, {"logs:read", "View operation logs"},
 		{"notifications:read", "View notifications"}, {"notifications:write", "Manage notifications"},
 		{"announcements:read", "View admin announcements"}, {"announcements:write", "Manage admin announcements"},
-		{"ai:assistant", "Use admin AI assistant"}, {"health:read", "View system health"},
+		{"ai:assistant", "Use admin AI assistant"}, {"ai:models:read", "View AI model configs"}, {"ai:models:write", "Manage AI model configs"}, {"health:read", "View system health"},
 		{"database:read", "View database table metadata"},
 		{"site:read", "View website content"}, {"site:write", "Manage website content and assets"},
 	} {
@@ -1360,4 +1402,17 @@ func envOr(key, fallback string) string {
 	}
 	return v
 }
+
+func envInt(key string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil || n <= 0 {
+		return fallback
+	}
+	return n
+}
+
 func normalizePhone(p string) string { return strings.Join(strings.Fields(strings.TrimSpace(p)), "") }

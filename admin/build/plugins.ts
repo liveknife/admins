@@ -14,7 +14,8 @@ import { codeInspectorPlugin } from "code-inspector-plugin";
 
 export function getPluginsList(
   VITE_CDN: boolean,
-  VITE_COMPRESSION: ViteCompression
+  VITE_COMPRESSION: ViteCompression,
+  VITE_CODE_INSPECTOR: boolean
 ): PluginOption[] {
   const lifecycle = process.env.npm_lifecycle_event;
   return [
@@ -28,10 +29,12 @@ export function getPluginsList(
      * Windows 默认组合键：Alt + Shift
      * 文档：https://inspector.fe-dev.cn/guide/start.html
      */
-    codeInspectorPlugin({
-      bundler: "vite",
-      hideConsole: true
-    }),
+    VITE_CODE_INSPECTOR
+      ? codeInspectorPlugin({
+          bundler: "vite",
+          hideConsole: true
+        })
+      : null,
     viteBuildInfo(),
     /**
      * 开发环境移除 vue-router 动态路由的无效匹配警告。

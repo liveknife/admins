@@ -13,6 +13,7 @@ const buildAdminRoutes = (user: GoUser) => {
   const routes: Array<any> = [];
   const children: Array<any> = [];
   const toolChildren: Array<any> = [];
+  const ragChildren: Array<any> = [];
 
   if (hasAdminAccess && permissions.includes("users:read")) {
     children.push({
@@ -84,14 +85,47 @@ const buildAdminRoutes = (user: GoUser) => {
   }
 
   if (hasAdminAccess && permissions.includes("ai:assistant")) {
-    toolChildren.push({
-      path: "/system-tools/ai-assistant",
-      component: "system-tools/ai-assistant/index",
-      name: "SystemToolsAIAssistant",
+    ragChildren.push({
+      path: "/rag/ai-assistant",
+      component: "rag/ai-assistant/index",
+      name: "RAGAIAssistant",
       meta: {
         title: "AI 助手",
         icon: "ri:robot-2-line",
         auths: ["ai:assistant"]
+      }
+    });
+    ragChildren.push({
+      path: "/rag/documents",
+      component: "rag/documents/index",
+      name: "RAGDocuments",
+      meta: {
+        title: "文档管理",
+        icon: "ri:file-upload-line",
+        auths: ["ai:assistant"]
+      }
+    });
+    ragChildren.push({
+      path: "/rag/index",
+      component: "rag/rag-index/index",
+      name: "RAGIndex",
+      meta: {
+        title: "RAG 索引管理",
+        icon: "ri:database-2-line",
+        auths: ["ai:assistant"]
+      }
+    });
+  }
+
+  if (hasAdminAccess && permissions.includes("ai:models:read")) {
+    ragChildren.push({
+      path: "/rag/ai-models",
+      component: "rag/ai-models/index",
+      name: "RAGAIModels",
+      meta: {
+        title: "大模型配置",
+        icon: "ri:brain-line",
+        auths: ["ai:models:read", "ai:models:write"]
       }
     });
   }
@@ -142,9 +176,22 @@ const buildAdminRoutes = (user: GoUser) => {
       meta: {
         title: "系统工具",
         icon: "ri:tools-line",
-        rank: 12
+        rank: 13
       },
       children: toolChildren
+    });
+  }
+
+  if (ragChildren.length > 0) {
+    routes.push({
+      path: "/rag",
+      name: "RAG",
+      meta: {
+        title: "RAG",
+        icon: "ri:mind-map",
+        rank: 12
+      },
+      children: ragChildren
     });
   }
 
@@ -155,7 +202,7 @@ const buildAdminRoutes = (user: GoUser) => {
       meta: {
         title: "官网管理",
         icon: "ri:global-line",
-        rank: 13
+        rank: 14
       },
       children: [
         {

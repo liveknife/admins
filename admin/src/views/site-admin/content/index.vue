@@ -316,7 +316,7 @@ const removeCurrent = async (row: { id: number }) => {
 const beforeUpload = async (file: File, target: UploadTarget) => {
   try {
     const res = await uploadSiteAsset(file);
-    (form as Record<string, string>)[target] = res.url;
+    (form as unknown as Record<UploadTarget, string>)[target] = res.url;
     message(t("site.uploadDone"), { type: "success" });
   } catch {
     message(t("site.uploadFailed"), { type: "error" });

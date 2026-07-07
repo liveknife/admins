@@ -9,6 +9,7 @@ export type Route =
   | { name: "home" }
   | { name: "article"; slug: string }
   | { name: "search"; q: string; category: string; tag: string; page: number }
+  | { name: "ask" }
   | { name: "demo" };
 
 const decode = (value: string) => {
@@ -27,6 +28,7 @@ const parseHash = (hash: string): Route => {
 
   if (path === "/" || path === "") return { name: "home" };
   if (path === "/demo") return { name: "demo" };
+  if (path === "/ask") return { name: "ask" };
   if (path === "/search") {
     return {
       name: "search",

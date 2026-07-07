@@ -15,7 +15,8 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
     VITE_PORT,
     VITE_COMPRESSION,
     VITE_PUBLIC_PATH,
-    VITE_API_PROXY_TARGET
+    VITE_API_PROXY_TARGET,
+    VITE_CODE_INSPECTOR
   } = wrapperEnv(loadEnv(mode, root));
   return {
     base: VITE_PUBLIC_PATH,
@@ -55,7 +56,11 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
         clientFiles: ["./index.html", "./src/{views,components}/*"]
       }
     },
-    plugins: getPluginsList(mode === "production" && VITE_CDN, VITE_COMPRESSION),
+    plugins: getPluginsList(
+      mode === "production" && VITE_CDN,
+      VITE_COMPRESSION,
+      VITE_CODE_INSPECTOR
+    ),
     // https://cn.vitejs.dev/config/dep-optimization-options.html#dep-optimization-options
     optimizeDeps: {
       include,
