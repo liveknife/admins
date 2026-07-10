@@ -55,8 +55,18 @@ export type SiteProject = {
   demo_url: string;
   repo_url: string;
   stack_tags: string;
+  role: string;
+  highlights: string;
+  metrics: string;
+  challenge: string;
+  solution: string;
+  gallery_json: string;
   status: string;
   is_featured: boolean;
+  priority: number;
+  start_date?: string;
+  end_date?: string;
+  published_at?: string;
 };
 
 export type SiteTimelineEvent = {

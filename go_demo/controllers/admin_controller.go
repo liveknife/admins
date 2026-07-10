@@ -1341,12 +1341,19 @@ func (c *AdminController) ListDatabaseColumns(g *gin.Context) {
 }
 
 func (c *AdminController) PublicSiteHome(g *gin.Context) {
+	if c.adminData.PublicSiteMaintenanceEnabled(g.Request.Context()) {
+		g.JSON(http.StatusServiceUnavailable, gin.H{
+			"maintenance": true,
+			"message":     "官网维护中，请稍后再试",
+		})
+		return
+	}
 	home, err := c.adminData.PublicSiteHome(g.Request.Context())
 	if err != nil {
 		g.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load site home"})
 		return
 	}
-	g.JSON(http.StatusOK, gin.H{"home": home})
+	g.JSON(http.StatusOK, gin.H{"home": home, "maintenance": false})
 }
 
 func (c *AdminController) PublicSiteResource(g *gin.Context) {
@@ -1381,6 +1388,10 @@ func (c *AdminController) PublicSiteSearch(g *gin.Context) {
 }
 
 func (c *AdminController) PublicSiteKnowledge(g *gin.Context) {
+	if !c.adminData.PublicRAGEnabled(g.Request.Context()) {
+		g.JSON(http.StatusForbidden, gin.H{"error": "public knowledge base is disabled"})
+		return
+	}
 	var req SiteKnowledgeRequest
 	if err := bindRequest(g, &req); err != nil {
 		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -1396,6 +1407,10 @@ func (c *AdminController) PublicSiteKnowledge(g *gin.Context) {
 }
 
 func (c *AdminController) PublicSiteKnowledgeStream(g *gin.Context) {
+	if !c.adminData.PublicRAGEnabled(g.Request.Context()) {
+		g.JSON(http.StatusForbidden, gin.H{"error": "public knowledge base is disabled"})
+		return
+	}
 	var req SiteKnowledgeRequest
 	if err := bindRequest(g, &req); err != nil {
 		g.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

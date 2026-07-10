@@ -91,6 +91,36 @@ const saveData = async () => {
   }
 };
 
+const saveSingleSetting = async (
+  item: SystemSetting,
+  value?: string | number | boolean
+) => {
+  if (value !== undefined) {
+    item.setting_value = String(value);
+  }
+  saving.value = true;
+  try {
+    const res = await saveSystemSettings([
+      {
+        ...item,
+        is_secret: isSensitive(item)
+      }
+    ]);
+    const next = res.settings?.find(
+      setting => setting.setting_key === item.setting_key
+    );
+    if (next) {
+      Object.assign(item, next);
+    }
+    message("Setting saved", { type: "success" });
+  } catch {
+    message("Setting save failed", { type: "error" });
+    await loadData();
+  } finally {
+    saving.value = false;
+  }
+};
+
 onMounted(loadData);
 </script>
 
@@ -130,6 +160,8 @@ onMounted(loadData);
               v-model="item.setting_value"
               active-value="true"
               inactive-value="false"
+              :loading="saving"
+              @change="value => saveSingleSetting(item, value)"
             />
             <el-input
               v-else-if="item.value_type === 'number'"

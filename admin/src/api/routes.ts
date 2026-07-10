@@ -168,6 +168,9 @@ const buildAdminRoutes = (user: GoUser) => {
         auths: ["ai:models:read", "ai:models:write"]
       }
     });
+  }
+
+  if (hasAdminAccess && permissions.includes("ai:logs:read")) {
     ragChildren.push({
       path: "/rag/ai-call-logs",
       component: "rag/ai-call-logs/index",
@@ -175,12 +178,12 @@ const buildAdminRoutes = (user: GoUser) => {
       meta: {
         title: "调用日志",
         icon: "ri:file-search-line",
-        auths: ["ai:models:read"]
+        auths: ["ai:logs:read"]
       }
     });
   }
 
-  if (hasAdminAccess) {
+  if (hasAdminAccess && permissions.includes("system:settings:read")) {
     toolChildren.push({
       path: "/system-tools/settings",
       component: "system-tools/settings/index",
@@ -188,7 +191,7 @@ const buildAdminRoutes = (user: GoUser) => {
       meta: {
         title: "系统配置中心",
         icon: "ri:settings-3-line",
-        auths: ["admin:access"]
+        auths: ["system:settings:read", "system:settings:write"]
       }
     });
   }
@@ -258,7 +261,13 @@ const buildAdminRoutes = (user: GoUser) => {
     });
   }
 
-  if (hasAdminAccess && permissions.includes("site:read")) {
+  const hasSiteMenu =
+    hasAdminAccess &&
+    (permissions.includes("site:read") ||
+      permissions.includes("site:operations:read") ||
+      permissions.includes("site:projects:read"));
+
+  if (hasSiteMenu) {
     routes.push({
       path: "/site-admin",
       name: "SiteAdmin",
@@ -268,27 +277,32 @@ const buildAdminRoutes = (user: GoUser) => {
         rank: 14
       },
       children: [
-        {
+        ...(permissions.includes("site:operations:read")
+          ? [{
           path: "/site-admin/operations",
           component: "site-admin/operations/index",
           name: "SiteAdminOperations",
           meta: {
             title: "运营仪表盘",
             icon: "ri:dashboard-3-line",
-            auths: ["site:read"]
+            auths: ["site:operations:read"]
           }
-        },
-        {
+        }]
+          : []),
+        ...(permissions.includes("site:projects:read")
+          ? [{
           path: "/site-admin/projects",
           component: "site-admin/projects/index",
           name: "SiteAdminProjects",
           meta: {
             title: "项目作品",
             icon: "ri:briefcase-4-line",
-            auths: ["site:read", "site:write"]
+            auths: ["site:projects:read", "site:projects:write"]
           }
-        },
-        {
+        }]
+          : []),
+        ...(permissions.includes("site:read")
+          ? [{
           path: "/site-admin/content",
           component: "site-admin/content/index",
           name: "SiteAdminContent",
@@ -297,7 +311,8 @@ const buildAdminRoutes = (user: GoUser) => {
             icon: "ri:layout-masonry-line",
             auths: ["site:read", "site:write"]
           }
-        }
+        }]
+          : [])
       ]
     });
   }

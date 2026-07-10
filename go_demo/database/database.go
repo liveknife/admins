@@ -858,9 +858,10 @@ func seedRBAC(db *sql.DB, d *Dialect) error {
 		{"dashboard:read", "View dashboard data"}, {"logs:read", "View operation logs"},
 		{"notifications:read", "View notifications"}, {"notifications:write", "Manage notifications"},
 		{"announcements:read", "View admin announcements"}, {"announcements:write", "Manage admin announcements"},
-		{"ai:assistant", "Use admin AI assistant"}, {"ai:models:read", "View AI model configs"}, {"ai:models:write", "Manage AI model configs"}, {"health:read", "View system health"},
+		{"ai:assistant", "Use admin AI assistant"}, {"ai:models:read", "View AI model configs"}, {"ai:models:write", "Manage AI model configs"}, {"ai:logs:read", "View AI model call logs"}, {"health:read", "View system health"},
+		{"system:settings:read", "View system settings"}, {"system:settings:write", "Manage system settings"},
 		{"database:read", "View database table metadata"},
-		{"site:read", "View website content"}, {"site:write", "Manage website content and assets"},
+		{"site:read", "View website content"}, {"site:write", "Manage website content and assets"}, {"site:operations:read", "View website operations dashboard"}, {"site:projects:read", "View website projects"}, {"site:projects:write", "Manage website projects"},
 	} {
 		sqlStr := d.RewriteSQL(fmt.Sprintf(`INSERT INTO permissions(code,description) VALUES($1,$2) %s`, upsertPerm))
 		if _, err := db.Exec(sqlStr, p.c, p.d); err != nil {

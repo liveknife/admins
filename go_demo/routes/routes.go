@@ -386,10 +386,10 @@ func buildRouteSpecs(
 		{Method: "PUT", Path: "/api/v1/admin/site/tech-stacks/:id", Handler: adminCtrl.SaveSiteTechStack, Auth: true, Permission: "site:write", Doc: docs.Op{Summary: "编辑技术栈", Tags: []string{"Admin · Site"}, Body: docs.Body{Required: true, Schema: controllers.SiteTechStackRequest{}}}},
 		{Method: "DELETE", Path: "/api/v1/admin/site/tech-stacks/:id", Handler: adminCtrl.DeleteSiteTechStack, Auth: true, Permission: "site:write", Doc: docs.Op{Summary: "删除技术栈", Tags: []string{"Admin · Site"}}},
 
-		{Method: "GET", Path: "/api/v1/admin/site/projects", Handler: adminCtrl.ListSiteProjects, Auth: true, Permission: "site:read", Doc: docs.Op{Summary: "项目列表", Tags: []string{"Admin · Site"}, Params: pageQuery}},
-		{Method: "POST", Path: "/api/v1/admin/site/projects", Handler: adminCtrl.SaveSiteProject, Auth: true, Permission: "site:write", Doc: docs.Op{Summary: "创建项目", Tags: []string{"Admin · Site"}, Body: docs.Body{Required: true, Schema: controllers.SiteProjectRequest{}}}},
-		{Method: "PUT", Path: "/api/v1/admin/site/projects/:id", Handler: adminCtrl.SaveSiteProject, Auth: true, Permission: "site:write", Doc: docs.Op{Summary: "编辑项目", Tags: []string{"Admin · Site"}, Body: docs.Body{Required: true, Schema: controllers.SiteProjectRequest{}}}},
-		{Method: "DELETE", Path: "/api/v1/admin/site/projects/:id", Handler: adminCtrl.DeleteSiteProject, Auth: true, Permission: "site:write", Doc: docs.Op{Summary: "删除项目", Tags: []string{"Admin · Site"}}},
+		{Method: "GET", Path: "/api/v1/admin/site/projects", Handler: adminCtrl.ListSiteProjects, Auth: true, Permission: "site:projects:read", Doc: docs.Op{Summary: "项目列表", Tags: []string{"Admin · Site"}, Params: pageQuery}},
+		{Method: "POST", Path: "/api/v1/admin/site/projects", Handler: adminCtrl.SaveSiteProject, Auth: true, Permission: "site:projects:write", Doc: docs.Op{Summary: "创建项目", Tags: []string{"Admin · Site"}, Body: docs.Body{Required: true, Schema: controllers.SiteProjectRequest{}}}},
+		{Method: "PUT", Path: "/api/v1/admin/site/projects/:id", Handler: adminCtrl.SaveSiteProject, Auth: true, Permission: "site:projects:write", Doc: docs.Op{Summary: "编辑项目", Tags: []string{"Admin · Site"}, Body: docs.Body{Required: true, Schema: controllers.SiteProjectRequest{}}}},
+		{Method: "DELETE", Path: "/api/v1/admin/site/projects/:id", Handler: adminCtrl.DeleteSiteProject, Auth: true, Permission: "site:projects:write", Doc: docs.Op{Summary: "删除项目", Tags: []string{"Admin · Site"}}},
 
 		{Method: "GET", Path: "/api/v1/admin/site/timeline", Handler: adminCtrl.ListSiteTimelineEvents, Auth: true, Permission: "site:read", Doc: docs.Op{Summary: "时间轴列表", Tags: []string{"Admin · Site"}, Params: pageQuery}},
 		{Method: "POST", Path: "/api/v1/admin/site/timeline", Handler: adminCtrl.SaveSiteTimelineEvent, Auth: true, Permission: "site:write", Doc: docs.Op{Summary: "创建时间轴事件", Tags: []string{"Admin · Site"}, Body: docs.Body{Required: true, Schema: controllers.SiteTimelineEventRequest{}}}},
@@ -418,11 +418,11 @@ func buildRouteSpecs(
 	)
 
 	specs = append(specs,
-		routeSpec{Method: "GET", Path: "/api/v1/admin/ai/call-logs", Handler: adminCtrl.ListAIModelCallLogs, Auth: true, Permission: "ai:models:read", Doc: docs.Op{Summary: "AI 模型调用日志", Tags: []string{"Admin 路 System"}, Params: pageQuery}},
-		routeSpec{Method: "GET", Path: "/api/v1/admin/ai/call-stats", Handler: adminCtrl.AIModelCallStats, Auth: true, Permission: "ai:models:read", Doc: docs.Op{Summary: "AI 模型调用统计", Tags: []string{"Admin 路 System"}}},
-		routeSpec{Method: "GET", Path: "/api/v1/admin/system/settings", Handler: adminCtrl.ListSystemSettings, Auth: true, Permission: "admin:access", Doc: docs.Op{Summary: "系统配置中心", Tags: []string{"Admin 路 System"}}},
-		routeSpec{Method: "PUT", Path: "/api/v1/admin/system/settings", Handler: adminCtrl.SaveSystemSettings, Auth: true, Permission: "admin:access", Doc: docs.Op{Summary: "保存系统配置", Tags: []string{"Admin 路 System"}, Body: docs.Body{Required: true, Schema: controllers.SystemSettingsRequest{}}}},
-		routeSpec{Method: "GET", Path: "/api/v1/admin/site/operations", Handler: adminCtrl.SiteOperationsDashboard, Auth: true, Permission: "site:read", Doc: docs.Op{Summary: "官网运营仪表盘", Tags: []string{"Admin 路 Site"}}},
+		routeSpec{Method: "GET", Path: "/api/v1/admin/ai/call-logs", Handler: adminCtrl.ListAIModelCallLogs, Auth: true, Permission: "ai:logs:read", Doc: docs.Op{Summary: "AI 模型调用日志", Tags: []string{"Admin 路 System"}, Params: pageQuery}},
+		routeSpec{Method: "GET", Path: "/api/v1/admin/ai/call-stats", Handler: adminCtrl.AIModelCallStats, Auth: true, Permission: "ai:logs:read", Doc: docs.Op{Summary: "AI 模型调用统计", Tags: []string{"Admin 路 System"}}},
+		routeSpec{Method: "GET", Path: "/api/v1/admin/system/settings", Handler: adminCtrl.ListSystemSettings, Auth: true, Permission: "system:settings:read", Doc: docs.Op{Summary: "系统配置中心", Tags: []string{"Admin 路 System"}}},
+		routeSpec{Method: "PUT", Path: "/api/v1/admin/system/settings", Handler: adminCtrl.SaveSystemSettings, Auth: true, Permission: "system:settings:write", Doc: docs.Op{Summary: "保存系统配置", Tags: []string{"Admin 路 System"}, Body: docs.Body{Required: true, Schema: controllers.SystemSettingsRequest{}}}},
+		routeSpec{Method: "GET", Path: "/api/v1/admin/site/operations", Handler: adminCtrl.SiteOperationsDashboard, Auth: true, Permission: "site:operations:read", Doc: docs.Op{Summary: "官网运营仪表盘", Tags: []string{"Admin 路 Site"}}},
 	)
 
 	return specs

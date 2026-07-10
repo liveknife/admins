@@ -148,6 +148,43 @@ function AnswerContent({ answer, onCitation }: { answer?: string; onCitation?: (
   );
 }
 
+function projectLines(value?: string) {
+  return (value || "")
+    .split(/\r?\n|[;；]/)
+    .map(item => item.trim())
+    .filter(Boolean);
+}
+
+function parseProjectGallery(value?: string) {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map(item => {
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object" && typeof item.url === "string") return item.url;
+        return "";
+      })
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function formatProjectDateRange(project: SiteProject) {
+  const format = (value?: string) => {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}`;
+  };
+  const start = format(project.start_date);
+  const end = project.status === "active" ? "Now" : format(project.end_date);
+  if (start && end) return `${start} - ${end}`;
+  return start || end || project.status || "Project";
+}
+
 function KnowledgeAsk({ resources }: { resources: SiteResource[] }) {
   const defaultQuestions = [
     "React 项目经验怎么总结？",
@@ -157,6 +194,7 @@ function KnowledgeAsk({ resources }: { resources: SiteResource[] }) {
   ];
   const [question, setQuestion] = useState(defaultQuestions[0]);
   const [answer, setAnswer] = useState<KnowledgeAnswer | null>(null);
+  const [askError, setAskError] = useState("");
   const [asking, setAsking] = useState(false);
   const prompts = answer?.suggestions?.length ? answer.suggestions.slice(0, 4) : defaultQuestions;
   const sourceCount = answer?.sources?.length ?? 0;
@@ -164,6 +202,7 @@ function KnowledgeAsk({ resources }: { resources: SiteResource[] }) {
   const ask = async () => {
     if (!question.trim()) return;
     setAsking(true);
+    setAskError("");
     try {
       const res = await fetch(`${apiBase}/api/v1/site/knowledge`, {
         method: "POST",
@@ -171,7 +210,14 @@ function KnowledgeAsk({ resources }: { resources: SiteResource[] }) {
         body: JSON.stringify({ question })
       });
       const data = await res.json();
+      if (!res.ok) {
+        setAnswer(null);
+        setAskError(data.error || "知识库问答暂不可用");
+        return;
+      }
       setAnswer(data.answer ?? null);
+    } catch {
+      setAskError("知识库连接失败，请稍后再试");
     } finally {
       setAsking(false);
     }
@@ -198,6 +244,7 @@ function KnowledgeAsk({ resources }: { resources: SiteResource[] }) {
             <button onClick={ask} disabled={asking}>{asking ? "检索中..." : "提问"}</button>
             <span>{sourceCount > 0 ? `已命中 ${sourceCount} 个来源` : `${resources.length} 篇内容可检索`}</span>
           </div>
+          {askError && <p className="askError">{askError}</p>}
           <div className="askQuick">
             <span>建议问题</span>
             <div>
@@ -391,6 +438,14 @@ function AskPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question, context })
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setMessages(prev => prev.map(item => item.id === assistantID ? {
+          ...item,
+          content: data.error || "知识库问答暂不可用，请稍后再试。"
+        } : item));
+        return;
+      }
       if (!res.body) throw new Error("stream unavailable");
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -427,6 +482,11 @@ function AskPage() {
         buffer = parts.pop() || "";
         parts.forEach(applyEvent);
       }
+    } catch {
+      setMessages(prev => prev.map(item => item.id === assistantID ? {
+        ...item,
+        content: "知识库连接失败，请稍后再试。"
+      } : item));
     } finally {
       setLoading(false);
     }
@@ -819,6 +879,19 @@ function HeroSearchBar() {
   );
 }
 
+function MaintenancePage({ message }: { message: string }) {
+  return (
+    <div className="maintenancePage">
+      <div>
+        <a className="brand" href="#/">Tech Lab</a>
+        <span>Maintenance</span>
+        <h1>官网维护中</h1>
+        <p>{message || "内容正在整理和更新，请稍后再访问。"}</p>
+      </div>
+    </div>
+  );
+}
+
 function HomePage({ home, loading }: { home: SiteHome; loading: boolean }) {
   const [activeBanner, setActiveBanner] = useState(0);
   const [isBannerPaused, setIsBannerPaused] = useState(false);
@@ -984,29 +1057,59 @@ function HomePage({ home, loading }: { home: SiteHome; loading: boolean }) {
           <h2>在线 Demo 展厅</h2>
         </div>
         <div className="demoGrid">
-          {home.projects.slice(0, 6).map(project => (
-            <article className="demoCard" key={project.id}>
-              <div className="demoCover">
-                {project.cover_url ? (
-                  <img src={assetURL(project.cover_url)} alt={project.name} />
-                ) : (
-                  <span>{project.name.slice(0, 2).toUpperCase()}</span>
-                )}
-              </div>
-              <div className="demoBody">
-                <div className="resourceMeta">
-                  <span>{project.is_featured ? "featured" : "project"}</span>
-                  <span>{project.stack_tags}</span>
+          {home.projects.slice(0, 6).map(project => {
+            const highlights = projectLines(project.highlights).slice(0, 3);
+            const metrics = projectLines(project.metrics).slice(0, 4);
+            const gallery = parseProjectGallery(project.gallery_json).slice(0, 3);
+            return (
+              <article className="demoCard projectCaseCard" key={project.id}>
+                <div className="demoCover">
+                  {project.cover_url ? (
+                    <img src={assetURL(project.cover_url)} alt={project.name} />
+                  ) : (
+                    <span>{project.name.slice(0, 2).toUpperCase()}</span>
+                  )}
+                  <div className="projectCoverMeta">
+                    <span>{project.is_featured ? "Featured" : project.status || "Project"}</span>
+                    <span>{formatProjectDateRange(project)}</span>
+                  </div>
                 </div>
-                <h3>{project.name}</h3>
-                <p>{project.summary}</p>
-                <div className="demoActions">
-                  {project.demo_url && <a href={project.demo_url} target="_blank" rel="noreferrer">在线预览</a>}
-                  {project.repo_url && <a href={project.repo_url} target="_blank" rel="noreferrer">查看源码</a>}
+                <div className="demoBody">
+                  <div className="resourceMeta">
+                    <span>{project.role || "Project case"}</span>
+                    <span>{splitTags(project.stack_tags).slice(0, 3).join(" / ")}</span>
+                  </div>
+                  <h3>{project.name}</h3>
+                  <p>{project.summary}</p>
+                  {!!metrics.length && (
+                    <div className="projectMetrics">
+                      {metrics.map(item => <span key={item}>{item}</span>)}
+                    </div>
+                  )}
+                  {!!highlights.length && (
+                    <ul className="projectHighlights">
+                      {highlights.map(item => <li key={item}>{item}</li>)}
+                    </ul>
+                  )}
+                  {(project.challenge || project.solution) && (
+                    <div className="projectCaseNotes">
+                      {project.challenge && <p><strong>Challenge</strong>{project.challenge}</p>}
+                      {project.solution && <p><strong>Solution</strong>{project.solution}</p>}
+                    </div>
+                  )}
+                  {!!gallery.length && (
+                    <div className="projectGallery">
+                      {gallery.map(item => <img key={item} src={assetURL(item)} alt={`${project.name} screenshot`} />)}
+                    </div>
+                  )}
+                  <div className="demoActions">
+                    {project.demo_url && <a href={project.demo_url} target="_blank" rel="noreferrer">在线预览</a>}
+                    {project.repo_url && <a href={project.repo_url} target="_blank" rel="noreferrer">查看源码</a>}
+                  </div>
                 </div>
-              </div>
-            </article>
-          ))}
+              </article>
+            );
+          })}
           {!loading && home.projects.length === 0 && <p className="empty">后台发布项目后会显示在这里。</p>}
         </div>
       </section>
@@ -1039,16 +1142,48 @@ function HomePage({ home, loading }: { home: SiteHome; loading: boolean }) {
 
 function App() {
   const [home, setHome] = useState<SiteHome>(emptyHome);
+  const [maintenanceMessage, setMaintenanceMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const route = useHashRoute();
 
+  const loadHome = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${apiBase}/api/v1/site/home`, { cache: "no-store" });
+      const data = await res.json().catch(() => ({}));
+      if (data.maintenance || (!res.ok && data.maintenance)) {
+        setMaintenanceMessage(data.message || "内容正在整理和更新，请稍后再访问。");
+        setHome(emptyHome);
+        return;
+      }
+      setMaintenanceMessage("");
+      setHome(data.home ?? emptyHome);
+    } catch {
+      setMaintenanceMessage("");
+      setHome(emptyHome);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    fetch(`${apiBase}/api/v1/site/home`)
-      .then(res => res.json())
-      .then(res => setHome(res.home ?? emptyHome))
-      .catch(() => setHome(emptyHome))
-      .finally(() => setLoading(false));
+    loadHome();
   }, []);
+
+  useEffect(() => {
+    if (route.name !== "home") return;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        loadHome();
+      }
+    };
+    window.addEventListener("focus", loadHome);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", loadHome);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [route.name]);
 
   // 访问统计上报（首次进站）
   useEffect(() => {
@@ -1075,6 +1210,9 @@ function App() {
 
   return (
     <main>
+      {maintenanceMessage && route.name === "home" && <MaintenancePage message={maintenanceMessage} />}
+      {maintenanceMessage && route.name === "home" ? null : (
+      <>
       {showTopBar && (
         <nav className="innerNav">
           <a className="brand" href="#/">Tech Lab</a>
@@ -1095,6 +1233,8 @@ function App() {
         />
       )}
       <RocketButton />
+      </>
+      )}
     </main>
   );
 }

@@ -118,6 +118,53 @@ func (s *AdminDataService) ensureDefaultSystemSettings(ctx context.Context) erro
 	return nil
 }
 
+func (s *AdminDataService) SystemSettingValue(ctx context.Context, key, fallback string) string {
+	if s == nil || s.db == nil {
+		return fallback
+	}
+	if err := s.ensureDefaultSystemSettings(ctx); err != nil {
+		return fallback
+	}
+	var value string
+	if err := database.QueryRowCtx(ctx, s.db, `SELECT setting_value FROM system_settings WHERE setting_key=$1`, strings.TrimSpace(key)).Scan(&value); err != nil {
+		return fallback
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func (s *AdminDataService) SystemSettingBool(ctx context.Context, key string, fallback bool) bool {
+	value := strings.ToLower(s.SystemSettingValue(ctx, key, strconv.FormatBool(fallback)))
+	switch value {
+	case "1", "true", "yes", "on", "enabled":
+		return true
+	case "0", "false", "no", "off", "disabled":
+		return false
+	default:
+		return fallback
+	}
+}
+
+func (s *AdminDataService) SystemSettingInt(ctx context.Context, key string, fallback int) int {
+	value := s.SystemSettingValue(ctx, key, strconv.Itoa(fallback))
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func (s *AdminDataService) PublicSiteMaintenanceEnabled(ctx context.Context) bool {
+	return s.SystemSettingBool(ctx, "site.maintenance", false)
+}
+
+func (s *AdminDataService) PublicRAGEnabled(ctx context.Context) bool {
+	return s.SystemSettingBool(ctx, "rag.public_enabled", true)
+}
+
 func (s *AdminDataService) RecordAIModelCallLog(ctx context.Context, input AIModelCallLogInput) error {
 	status := strings.TrimSpace(input.Status)
 	if status == "" {
@@ -136,7 +183,18 @@ func (s *AdminDataService) RecordAIModelCallLog(ctx context.Context, input AIMod
 		input.ResponseChars,
 		limitRunes(input.ErrorMessage, 2000),
 	)
+	if err == nil {
+		s.cleanupAIModelCallLogs(ctx)
+	}
 	return err
+}
+
+func (s *AdminDataService) cleanupAIModelCallLogs(ctx context.Context) {
+	days := s.SystemSettingInt(ctx, "ai.log_retention_days", 30)
+	if days <= 0 {
+		return
+	}
+	_, _ = database.ExecCtx(ctx, s.db, `DELETE FROM ai_model_call_logs WHERE created_at < $1`, time.Now().AddDate(0, 0, -days))
 }
 
 func (s *AdminDataService) ListAIModelCallLogs(ctx context.Context, page, pageSize int, provider, operation, status string) ([]models.AIModelCallLog, int64, error) {

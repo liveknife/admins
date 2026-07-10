@@ -1986,6 +1986,17 @@ func permissionLabel(code string) string {
 		"site:read":           "官网管理",
 		"site:write":          "官网内容写入",
 	}
+	extraLabels := map[string]string{
+		"ai:logs:read":          "AI 调用日志",
+		"system:settings:read":  "系统配置中心",
+		"system:settings:write": "系统配置写入",
+		"site:operations:read":  "官网运营仪表盘",
+		"site:projects:read":    "项目作品",
+		"site:projects:write":   "项目作品写入",
+	}
+	if label, ok := extraLabels[code]; ok {
+		return label
+	}
 	if label, ok := labels[code]; ok {
 		return label
 	}
@@ -2037,12 +2048,20 @@ func menuForPermission(code string) models.PermissionTreeNode {
 		return models.PermissionTreeNode{ID: "/system-tools/ai-assistant", Label: "AI 助手", Type: "menu"}
 	case "ai:models:read":
 		return models.PermissionTreeNode{ID: "/system-tools/ai-models", Label: "大模型配置", Type: "menu"}
+	case "ai:logs:read":
+		return models.PermissionTreeNode{ID: "/rag/ai-call-logs", Label: "AI 调用日志", Type: "menu"}
+	case "system:settings:read":
+		return models.PermissionTreeNode{ID: "/system-tools/settings", Label: "系统配置中心", Type: "menu"}
 	case "health:read":
 		return models.PermissionTreeNode{ID: "/system-tools/health", Label: "系统健康监控", Type: "menu"}
 	case "database:read":
 		return models.PermissionTreeNode{ID: "/system-tools/database", Label: "数据库表结构", Type: "menu"}
 	case "site:read":
 		return models.PermissionTreeNode{ID: "/site-admin/content", Label: "官网管理", Type: "menu"}
+	case "site:operations:read":
+		return models.PermissionTreeNode{ID: "/site-admin/operations", Label: "官网运营仪表盘", Type: "menu"}
+	case "site:projects:read":
+		return models.PermissionTreeNode{ID: "/site-admin/projects", Label: "项目作品", Type: "menu"}
 	default:
 		return models.PermissionTreeNode{}
 	}
